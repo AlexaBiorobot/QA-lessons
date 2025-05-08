@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import os, json, time
+import os
+import json
+import time
+
 import streamlit as st
 import pandas as pd
 import gspread
@@ -25,25 +28,23 @@ REPL_SHEET        = "Replacement"
 
 @st.cache_data
 def get_client():
-    import streamlit as _st
-
-    scope  = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-    # сначала пытаемся взять из переменной окружения (GitHub Actions и т.п.)
+    """Авторизация для gspread: сначала из env, иначе из st.secrets."""
+    scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
     if not sa_json:
-        # если её нет — берём из секретов Streamlit Cloud
-        sa_json = _st.secrets["GCP_SERVICE_ACCOUNT"]
-    sa     = json.loads(sa_json)
-    creds  = ServiceAccountCredentials.from_json_keyfile_dict(sa, scope)
+        sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
+    creds_info = json.loads(sa_json)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
     return gspread.authorize(creds)
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
+    """Retry при любых исключениях (включая 5xx) с экспоненциальным бэкофом."""
     backoff = initial_backoff
-    for i in range(1, max_attempts+1):
+    for attempt in range(1, max_attempts + 1):
         try:
             return func(*args, **kwargs)
-        except Exception:
-            if i==max_attempts:
+        except Exception as e:
+            if attempt == max_attempts:
                 raise
             time.sleep(backoff)
             backoff *= 2
@@ -61,10 +62,10 @@ def load_sheet_values(ss_id, sheet_name):
 
 @st.cache_data
 def build_df():
-    # 1) уроки
+    # 1) Уроки
     def load_lessons(ss, name, region):
         df = load_sheet_values(ss, name)
-        # выбираем R(17),Q(16),B(1),J(9),N(13),G(6),H(7),Y(24)
+        # R(17),Q(16),B(1),J(9),N(13),G(6),H(7),Y(24)
         df = df.iloc[:, [17,16,1,9,13,6,7,24]]
         df.columns = [
             "Tutor name","Tutor ID","Date of the lesson","Group",
@@ -78,23 +79,21 @@ def build_df():
     df_brz = load_lessons(LESSONS_SS, BRAZIL_SHEET, "Brazil")
     df = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # 2) рейтинг
+    # 2) Рейтинг
     def load_rating(ss):
         df_r = load_sheet_values(ss, RATING_SHEET)
-        # предполагаем, что в шапке есть точно эти имена:
-        cols = ["Tutor ID","Rating",
-                "Num of QA scores",
-                "Num of QA scores (last 90 days)",
-                "Average QA score",
-                "Average QA score (last 2 scores within last 90 days)",
-                "Average QA marker",
-                "Average QA marker (last 2 markers within last 90 days)"]
+        cols = [
+            "Tutor ID","Rating",
+            "Num of QA scores","Num of QA scores (last 90 days)",
+            "Average QA score","Average QA score (last 2 scores within last 90 days)",
+            "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
+        ]
         return df_r[cols]
 
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
 
-    # мёрджим по Tutor ID + Region
+    # Разделяем по региону, мёрджим нужный рейтинг
     df = df.merge(r_lat, on="Tutor ID", how="left", indicator=False).where(df["Region"]=="LATAM", df)
     df = df.merge(r_brz, on="Tutor ID", how="left", indicator=False).where(df["Region"]=="Brazil", df)
 
@@ -103,8 +102,7 @@ def build_df():
         df_q = load_sheet_values(ss, QA_SHEET)
         df_q["Date"] = pd.to_datetime(df_q["B"], errors="coerce")
         return df_q[["A","E","Date","C","D"]].rename(columns={
-            "A":"Tutor ID","E":"Group",
-            "C":"QA score","D":"QA marker"
+            "A":"Tutor ID","E":"Group","C":"QA score","D":"QA marker"
         })
 
     q_lat = load_qa(QA_LATAM_SS)
@@ -127,11 +125,11 @@ def build_df():
 st.set_page_config(layout="wide")
 df = build_df()
 
-# sidebar filters
+# Sidebar-фильтры
 st.sidebar.header("Filters")
 filters = {}
 for col in df.columns:
-    if df[col].dtype == "object":
+    if df[col].dtype == object or pd.api.types.is_categorical_dtype(df[col]):
         opts = df[col].dropna().unique().tolist()
         sel  = st.sidebar.multiselect(col, opts, default=opts)
         filters[col] = sel
@@ -145,6 +143,6 @@ dff = df[mask]
 st.title("QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
 
-# download
+# Кнопка скачивания
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
