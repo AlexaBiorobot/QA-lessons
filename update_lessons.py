@@ -2,12 +2,13 @@
 import os
 import json
 import logging
+import time
 
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
-from gspread.exceptions import APIError
+from gspread.exceptions import APIError, WorksheetNotFound
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -21,6 +22,23 @@ DST_SHEET_NAME   = "Lessons"
 
 SERVICE_ACCOUNT_JSON = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
 
+def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
+    """Retry any Google Sheets API call on 5xx errors."""
+    backoff = initial_backoff
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func(*args, **kwargs)
+        except APIError as e:
+            code = None
+            if e.response:
+                code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
+            if code and 500 <= int(code) < 600 and attempt < max_attempts:
+                logging.warning(f"API {code} on attempt {attempt}, retrying in {backoff:.1f}s…")
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
+
 def main():
     # 1) Авторизация
     scope  = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
@@ -28,10 +46,10 @@ def main():
     client = gspread.authorize(creds)
     logging.info("✔ Authenticated to Google Sheets")
 
-    # 2) Читаем исходный лист
-    sh_src = client.open_by_key(SRC_SS_ID)
-    ws_src = sh_src.worksheet(SRC_SHEET_NAME)
-    rows   = ws_src.get_all_values()
+    # 2) Читаем исходный лист с retry
+    sh_src = api_retry(client.open_by_key, SRC_SS_ID)
+    ws_src = api_retry(sh_src.worksheet, SRC_SHEET_NAME)
+    rows   = api_retry(ws_src.get_all_values)
 
     # 3) Собираем строки сразу после каждой A="Tutor"
     out = []
@@ -43,17 +61,26 @@ def main():
         logging.info("No rows after 'Tutor', nothing to write.")
         return
 
-    # 4) Формируем DataFrame (заголовки берём из первой строки листа)
+    # 4) Формируем DataFrame (шапка из первой строки источника)
     header = rows[0]
-    df = pd.DataFrame(out, columns=header)
+    df     = pd.DataFrame(out, columns=header)
 
-    # 5) Пишем в целевой лист (заменяем всё)
-    sh_dst = client.open_by_key(DST_SS_ID)
-    ws_dst = sh_dst.worksheet(DST_SHEET_NAME)
+    # 5) Очищаем диапазон A2:Q и записываем данные с retry
+    sh_dst = api_retry(client.open_by_key, DST_SS_ID)
+    ws_dst = api_retry(sh_dst.worksheet, DST_SHEET_NAME)
 
-    ws_dst.clear()
-    set_with_dataframe(ws_dst, df, include_index=False, include_column_header=True)
-    logging.info(f"✔ Written {len(df)} rows to '{DST_SHEET_NAME}'")
+    api_retry(ws_dst.batch_clear, ["A2:Q"])
+    api_retry(
+        set_with_dataframe,
+        ws_dst,
+        df,
+        row=2,
+        col=1,
+        include_index=False,
+        include_column_header=False
+    )
+
+    logging.info(f"✔ Written {len(df)} rows to '{DST_SHEET_NAME}' starting at A2")
 
 if __name__ == "__main__":
     main()
