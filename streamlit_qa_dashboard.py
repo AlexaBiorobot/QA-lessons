@@ -1,123 +1,125 @@
-#!/usr/bin/env python3
-import os
-import json
-import logging
-import time
-
+import streamlit as st
+import os, json
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from gspread_dataframe import set_with_dataframe
-from gspread.exceptions import APIError
-from googleapiclient.errors import HttpError
+from datetime import datetime, timedelta
 
-# —————————————————————————————
-# Ваши константы
-SOURCE_SS_ID        = "1gV9STzFPKMeIkVO6MFILzC-v2O6cO3XZyi4sSstgd8A"
-SOURCE_SHEET_NAME   = "All lesson reviews"
-DEST_SS_ID          = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
-DEST_SHEET_NAME     = "QA - Lesson evaluation"
-# —————————————————————————————
+# === Constants ===
+LATAM_SS = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
+BRAZIL_SS = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"  # same doc, different sheets
+RATING_LATAM_SS = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
+RATING_BRAZIL_SS = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
+QA_LATAM_SS = RATING_LATAM_SS
+QA_BRAZIL_SS = RATING_BRAZIL_SS
+REPL_SS = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# authorize
+def authorize():
+    scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
+    sa = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa, scope)
+    return gspread.authorize(creds)
 
-def get_http_code(exc):
-    """
-    Универсально извлекает HTTP-код из APIError или HttpError.
-    """
-    # gspread.exceptions.APIError
-    if hasattr(exc, "response") and hasattr(exc.response, "status_code"):
-        return exc.response.status_code
-    # googleapiclient.errors.HttpError
-    if hasattr(exc, "status"):
-        return exc.status
-    if hasattr(exc, "resp") and hasattr(exc.resp, "status"):
-        return exc.resp.status
-    return None
-
-
-def fetch_with_retries(ws, max_attempts=8, initial_backoff=1.0):
-    """
-    Читает весь лист через get_all_values() с retry при ошибках 5xx.
-    """
-    backoff = initial_backoff
-    for attempt in range(1, max_attempts + 1):
-        try:
-            logging.info(f"Попытка #{attempt} чтения листа…")
-            return ws.get_all_values()
-        except (APIError, HttpError) as e:
-            code = get_http_code(e)
-            if code and 500 <= int(code) < 600 and attempt < max_attempts:
-                logging.warning(f"Получили {code}, ждем {backoff:.1f}s и повторяем…")
-                time.sleep(backoff)
-                backoff *= 2
-                continue
-            logging.error(f"Ошибка при чтении листа (код={code}): {e}")
-            raise
-    raise RuntimeError("Не удалось получить данные после нескольких попыток")
-
+client = authorize()
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
-    """
-    Общий retry для любых API-вызовов, ловим ошибки 5xx.
-    """
     backoff = initial_backoff
-    for attempt in range(1, max_attempts + 1):
+    for attempt in range(1, max_attempts+1):
         try:
             return func(*args, **kwargs)
-        except (APIError, HttpError) as e:
-            code = get_http_code(e)
-            if code and 500 <= int(code) < 600 and attempt < max_attempts:
-                logging.warning(f"API {code} на попытке {attempt}, retry через {backoff}s…")
+        except Exception as e:
+            code = getattr(e, 'response', None)
+            if code and attempt < max_attempts:
                 time.sleep(backoff)
                 backoff *= 2
                 continue
-            logging.error(f"APIError на попытке {attempt} (код={code}): {e}")
             raise
-    raise RuntimeError("API вызовы завершились неудачно после retries")
 
+# load lessons
+def load_lessons(sheet_name, region):
+    rows = api_retry(client.open_by_key, LATAM_SS if region=='LATAM' else BRAZIL_SS)
+    ws = api_retry(rows.worksheet, sheet_name)
+    df = pd.DataFrame(api_retry(ws.get_all_records))
+    df['Region'] = region
+    return df
 
-def main():
-    # 1) Авторизация
-    scope   = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
-    creds   = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
-    client  = gspread.authorize(creds)
-    logging.info("✔ Авторизованы в Google Sheets")
+df_latam = load_lessons('lessons LATAM', 'LATAM')
+df_brazil = load_lessons('lessons Brazil', 'Brazil')
 
-    # 2) Считываем исходный лист с retry
-    sh_src   = client.open_by_key(SOURCE_SS_ID)
-    ws_src   = sh_src.worksheet(SOURCE_SHEET_NAME)
-    all_vals = fetch_with_retries(ws_src)
+# select and rename
+cols = ['R','Q','B','J','N','G','H','Y','Region']
+names = ['Tutor name','Tutor ID','Date','Group','Course ID','Module','Lesson','Lesson Link','Region']
+df = pd.concat([df_latam, df_brazil], ignore_index=True)[cols]
+df.columns = names
 
-    if not all_vals or len(all_vals) < 2:
-        logging.error("Исходный лист пуст или нет данных")
-        return
+# load ratings
+def load_rating(ss_id, rating_col):
+    ws = api_retry(client.open_by_key, ss_id).worksheet('Rating')
+    r = pd.DataFrame(api_retry(ws.get_all_records))
+    cols = ['A', rating_col] + list('FGHIJK')
+    r = r[cols]
+    r.columns = ['Tutor ID','Rating','F','G','H','I','J','K']
+    return r
 
-    # 3) Формируем DataFrame и выбираем колонки C, D, O, M, F
-    df_src = pd.DataFrame(all_vals[1:], columns=all_vals[0])
-    df      = df_src.iloc[:, [2, 3, 14, 12, 5]]
-    logging.info(f"→ Оставили колонки C,D,O,M,F: {df.shape[0]} строк")
+ratings = pd.concat([load_rating(RATING_LATAM_SS,'BU'), load_rating(RATING_BRAZIL_SS,'BO')], ignore_index=True)
+# merge
 
-    # 4) Записываем в целевой лист — очищаем A:E и вставляем df туда с retry
-    sh_dst = client.open_by_key(DEST_SS_ID)
-    ws_dst = sh_dst.worksheet(DEST_SHEET_NAME)
+df = df.merge(ratings, on='Tutor ID', how='left')
 
-    api_retry(ws_dst.batch_clear, ["A:E"])
-    api_retry(
-        set_with_dataframe,
-        ws_dst,
-        df,
-        row=1,
-        col=1,
-        include_index=False,
-        include_column_header=True
-    )
-    logging.info(f"✔ Данные записаны в «{DEST_SHEET_NAME}» — {df.shape[0]} строк")
+# load QA evals
+def load_qa(ss_id):
+    ws = api_retry(client.open_by_key, ss_id).worksheet('QA - Lesson evaluation')
+    qa = pd.DataFrame(api_retry(ws.get_all_records))
+    qa = qa[['E','B','C','D']]
+    qa.columns = ['Group','Date','QA score','QA marker']
+    qa['Date'] = pd.to_datetime(qa['Date'])
+    return qa
 
+qa = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
 
-if __name__ == "__main__":
-    main()
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.merge(qa, on=['Group','Date'], how='left')
+
+# load replacements
+rep = pd.DataFrame(api_retry(client.open_by_key, REPL_SS).worksheet('Replacement').get_all_records())
+rep['Date'] = pd.to_datetime(rep['D'])
+rep_flag = rep[['F','Date']].drop_duplicates()
+rep_flag.columns = ['Group','Date']
+rep_flag['Replacement or not'] = 'Replacement/Postponement'
+
+df = df.merge(rep_flag, on=['Group','Date'], how='left')
+df['Replacement or not'] = df['Replacement or not'].fillna('')
+
+# aggregates
+now = datetime.now()
+thresh = now - timedelta(days=90)
+for col in ['QA score','QA marker']:
+    df[f'# {col} total'] = df.groupby('Tutor ID')[col].transform('count')
+    df[f'# {col} 90d'] = df[df['Date']>=thresh].groupby('Tutor ID')[col].transform('count')
+    df[f'Avg {col} total'] = df.groupby('Tutor ID')[col].transform('mean')
+    df[f'Avg {col} 90d'] = df[df['Date']>=thresh].groupby('Tutor ID')[col].transform('mean')
+
+# Streamlit UI
+st.set_page_config(layout='wide')
+st.title('Tutor QA & Rating Dashboard')
+
+# Sidebar filters
+with st.sidebar:
+    filters = {}
+    for c in df.columns:
+        if df[c].dtype == 'object' or c in ['Date','Region']:
+            options = df[c].dropna().unique().tolist()
+            sel = st.multiselect(c, options)
+            filters[c] = sel
+# apply filters
+df_filtered = df.copy()
+for c, sel in filters.items():
+    if sel:
+        df_filtered = df_filtered[df_filtered[c].isin(sel)]
+
+# main table
+st.dataframe(df_filtered, use_container_width=True)
+
+# detail
+st.write(df_filtered)
