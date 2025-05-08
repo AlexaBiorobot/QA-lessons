@@ -25,8 +25,15 @@ REPL_SHEET        = "Replacement"
 
 @st.cache_data
 def get_client():
+    import streamlit as _st
+
     scope  = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-    sa     = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+    # сначала пытаемся взять из переменной окружения (GitHub Actions и т.п.)
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
+    if not sa_json:
+        # если её нет — берём из секретов Streamlit Cloud
+        sa_json = _st.secrets["GCP_SERVICE_ACCOUNT"]
+    sa     = json.loads(sa_json)
     creds  = ServiceAccountCredentials.from_json_keyfile_dict(sa, scope)
     return gspread.authorize(creds)
 
