@@ -6,6 +6,15 @@ import io
 
 import streamlit as st
 import pandas as pd
+# ===== DEBUG: проверяем, доступен ли public CSV =====
+LATAM_SS  = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
+LATAM_GID = "0"
+url = f"https://docs.google.com/spreadsheets/d/{LATAM_SS}/export?format=csv&gid={LATAM_GID}"
+try:
+    df0 = pd.read_csv(url)
+    print("DEBUG: public CSV loaded OK, столбцы:", df0.columns.tolist())
+except Exception as err:
+    print("DEBUG: не удалось загрузить public CSV:", err)
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
