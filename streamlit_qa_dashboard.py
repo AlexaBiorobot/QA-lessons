@@ -2,17 +2,21 @@
 import os
 import json
 import time
+import io
+
 import streamlit as st
 import pandas as pd
+import requests
 import gspread
 from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import set_with_dataframe
 from gspread.exceptions import APIError
 
-# —————————————————————————————
-# Константы ваших таблиц и листов
+# === Constants ===
 LESSONS_SS        = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
-LATAM_SHEET       = "lessons LATAM"
-BRAZIL_SHEET      = "lessons Brazil"
+LATAM_GID         = "0"          # gid вашей вкладки "lessons LATAM"
+BRAZIL_GID        = "835553195"  # gid вашей вкладки "lessons Brazil"
 
 RATING_LATAM_SS   = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING_BRAZIL_SS  = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
@@ -28,14 +32,13 @@ REPL_SHEET        = "Replacement"
 
 @st.cache_data
 def get_client():
-    # Берём сервисный аккаунт из переменной окружения или из Secrets Streamlit
+    """Авторизация сервис-аккаунтом для GSpread."""
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets["GCP_SERVICE_ACCOUNT"]
     info    = json.loads(sa_json)
-    scopes  = [
+    creds   = Credentials.from_service_account_info(info, scopes=[
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
-    ]
-    creds = Credentials.from_service_account_info(info, scopes=scopes)
+    ])
     return gspread.authorize(creds)
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
@@ -51,12 +54,29 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
+def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
+    """Тянем lessons LATAM/Brazil через публичный CSV-экспорт по GID."""
+    url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    df = pd.read_csv(io.StringIO(resp.text), dtype=str)
+
+    # R=17,Q=16,B=1,J=9,N=13,G=6,H=7,Y=24
+    df = df.iloc[:, [17,16,1,9,13,6,7,24]].copy()
+    df.columns = [
+        "Tutor name","Tutor ID","Date of the lesson","Group",
+        "Course ID","Module","Lesson","Lesson Link"
+    ]
+    df["Region"] = region
+    df["Date of the lesson"] = pd.to_datetime(df["Date of the lesson"], errors="coerce")
+    return df
+
 def load_sheet_values(ss_id, sheet_name):
+    """Универсальная загрузка любого не-публичного листа через GSpread."""
     client = get_client()
     sh     = api_retry(client.open_by_key, ss_id)
     ws     = api_retry(sh.worksheet, sheet_name)
     rows   = api_retry(ws.get_all_values)
-    # выравниваем все строки по максимальной ширине
     maxc   = max(len(r) for r in rows)
     header = rows[0] + [""]*(maxc-len(rows[0]))
     data   = [r+[""]*(maxc-len(r)) for r in rows[1:]]
@@ -64,23 +84,12 @@ def load_sheet_values(ss_id, sheet_name):
 
 @st.cache_data
 def build_df():
-    # 1) Уроки из LATAM/Brazil
-    def load_lessons(ss_id, sheet_name, region):
-        raw = load_sheet_values(ss_id, sheet_name)
-        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
-        df.columns = [
-            "Tutor name","Tutor ID","Date of the lesson","Group",
-            "Course ID","Module","Lesson","Lesson Link"
-        ]
-        df["Region"] = region
-        df["Date of the lesson"] = pd.to_datetime(df["Date of the lesson"], errors="coerce")
-        return df
-
-    df_lat = load_lessons(LESSONS_SS, LATAM_SHEET,  "LATAM")
-    df_brz = load_lessons(LESSONS_SS, BRAZIL_SHEET, "Brazil")
+    # 1) lessons LATAM + Brazil
+    df_lat = load_public_lessons(LESSONS_SS, LATAM_GID,  "LATAM")
+    df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # 2) Рейтинг
+    # 2) Rating
     def load_rating(ss_id):
         r = load_sheet_values(ss_id, RATING_SHEET)
         cols = [
@@ -97,7 +106,7 @@ def build_df():
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
 
-    # мёржим только по своему региону, чтобы не перезаписать
+    # объединяем рейтинг по региону
     df = (
         df
         .merge(r_lat, on="Tutor ID", how="left")
@@ -106,7 +115,7 @@ def build_df():
         .where(df["Region"]=="Brazil", df)
     )
 
-    # 3) QA-оценки
+    # 3) QA
     def load_qa(ss_id):
         q = load_sheet_values(ss_id, QA_SHEET)
         q["Date"] = pd.to_datetime(q["B"], errors="coerce")
@@ -150,7 +159,7 @@ df = build_df()
 st.sidebar.header("Filters")
 filters = {}
 for col in df.columns:
-    if df[col].dtype == object or pd.api.types.is_string_dtype(df[col]):
+    if df[col].dtype == object:
         opts = sorted(df[col].dropna().unique())
         filters[col] = st.sidebar.multiselect(col, opts, default=opts)
 
@@ -160,10 +169,9 @@ for c, sel in filters.items():
 
 dff = df[mask]
 
-# Основная таблица
 st.title("📊 QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
 
-# Кнопка скачивания
+# Скачать CSV
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
