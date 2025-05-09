@@ -37,7 +37,8 @@ def get_client():
         else env
     )
     sa_json = sa_json or st.secrets["GCP_SERVICE_ACCOUNT"]
-    info    = pd.io.json.loads(sa_json)
+    import json
+    info    = json.loads(sa_json)
     creds   = Credentials.from_service_account_info(
         info,
         scopes=[
