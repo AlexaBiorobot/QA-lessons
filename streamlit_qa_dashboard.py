@@ -81,25 +81,23 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     return df
 
 
-def load_sheet_values(ss_id: str, sheet_name: str) -> pd.DataFrame:
-    """Чтение приватного листа через gspread."""
+def load_sheet_with_header2(ss_id: str, sheet_name: str) -> pd.DataFrame:
+    """То же, что load_sheet_values, но шапка во второй строке."""
     client = get_client()
+    sh     = api_retry(client.open_by_key, ss_id)
+    ws     = api_retry(sh.worksheet, sheet_name)
+    rows   = api_retry(ws.get_all_values)
 
-    # отладка открытия
-    try:
-        client.open_by_key(ss_id)
-    except APIError as e:
-        st.error(f"Не удалось открыть таблицу {ss_id}: HTTP {e.response.status_code}")
-        st.text(e.response.text[:500])
-        raise
+    if len(rows) < 2:
+        raise RuntimeError(f"Лист «{sheet_name}» слишком короткий")
+    # в rows[1] настоящая шапка, данные с 2-й строки (индекс 2 и дальше)
+    header = rows[1]
+    data   = rows[2:]
 
-    sh   = api_retry(client.open_by_key, ss_id)
-    ws   = api_retry(sh.worksheet, sheet_name)
-    rows = api_retry(ws.get_all_values)
+    maxc   = max(len(header), *(len(r) for r in data))
+    header = header + [""]*(maxc - len(header))
+    data   = [r + [""]*(maxc - len(r)) for r in data]
 
-    maxc   = max(len(r) for r in rows)
-    header = rows[0] + [""]*(maxc-len(rows[0]))
-    data   = [r + [""]*(maxc-len(r)) for r in rows[1:]]
     return pd.DataFrame(data, columns=header)
 
 
@@ -110,16 +108,20 @@ def build_df() -> pd.DataFrame:
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # 2) Rating
-    def load_rating(ss_id: str) -> pd.DataFrame:
-        r = load_sheet_values(ss_id, RATING_SHEET)
-        cols = [
-            "Tutor ID","Rating",
-            "Num of QA scores","Num of QA scores (last 90 days)",
-            "Average QA score","Average QA score (last 2 scores within last 90 days)",
-            "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
-        ]
-        return r[cols]
+def load_rating(ss_id: str) -> pd.DataFrame:
+    # используем функцию с header_row=1
+    r = load_sheet_with_header2(ss_id, RATING_SHEET)
+    cols = [
+        "Tutor ID",
+        "Rating",
+        "Num of QA scores",
+        "Num of QA scores (last 90 days)",
+        "Average QA score",
+        "Average QA score (last 2 scores within last 90 days)",
+        "Average QA marker",
+        "Average QA marker (last 2 markers within last 90 days)"
+    ]
+    return r[cols]
 
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
