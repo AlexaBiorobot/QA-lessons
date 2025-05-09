@@ -93,7 +93,9 @@ def build_df():
     def load_rating(ss_id):
         r = load_sheet_values(ss_id, RATING_SHEET)
         cols = [
-            "Tutor ID","Rating",
+            "ID",
+            "Tutor",
+            "Rating w retention",
             "Num of QA scores",
             "Num of QA scores (last 90 days)",
             "Average QA score",
