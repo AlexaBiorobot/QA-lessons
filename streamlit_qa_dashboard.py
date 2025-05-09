@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 
 # —————————————————————————————
-# Константы
+# Константы ваших таблиц и листов
 LESSONS_SS        = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 LATAM_SHEET       = "lessons LATAM"
 BRAZIL_SHEET      = "lessons Brazil"
@@ -28,8 +28,8 @@ REPL_SHEET        = "Replacement"
 
 @st.cache_data
 def get_client():
-    import streamlit as _st
-    sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or _st.secrets["GCP_SERVICE_ACCOUNT"]
+    # Берём сервисный аккаунт из переменной окружения или из Secrets Streamlit
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets["GCP_SERVICE_ACCOUNT"]
     info    = json.loads(sa_json)
     scopes  = [
         "https://spreadsheets.google.com/feeds",
@@ -56,6 +56,7 @@ def load_sheet_values(ss_id, sheet_name):
     sh     = api_retry(client.open_by_key, ss_id)
     ws     = api_retry(sh.worksheet, sheet_name)
     rows   = api_retry(ws.get_all_values)
+    # выравниваем все строки по максимальной ширине
     maxc   = max(len(r) for r in rows)
     header = rows[0] + [""]*(maxc-len(rows[0]))
     data   = [r+[""]*(maxc-len(r)) for r in rows[1:]]
@@ -63,10 +64,10 @@ def load_sheet_values(ss_id, sheet_name):
 
 @st.cache_data
 def build_df():
-    # 1) уроки
+    # 1) Уроки из LATAM/Brazil
     def load_lessons(ss_id, sheet_name, region):
         raw = load_sheet_values(ss_id, sheet_name)
-        df = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
+        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
         df.columns = [
             "Tutor name","Tutor ID","Date of the lesson","Group",
             "Course ID","Module","Lesson","Lesson Link"
@@ -77,9 +78,9 @@ def build_df():
 
     df_lat = load_lessons(LESSONS_SS, LATAM_SHEET,  "LATAM")
     df_brz = load_lessons(LESSONS_SS, BRAZIL_SHEET, "Brazil")
-    df = pd.concat([df_lat, df_brz], ignore_index=True)
+    df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # 2) рейтинг
+    # 2) Рейтинг
     def load_rating(ss_id):
         r = load_sheet_values(ss_id, RATING_SHEET)
         cols = [
@@ -96,6 +97,7 @@ def build_df():
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
 
+    # мёржим только по своему региону, чтобы не перезаписать
     df = (
         df
         .merge(r_lat, on="Tutor ID", how="left")
@@ -104,7 +106,7 @@ def build_df():
         .where(df["Region"]=="Brazil", df)
     )
 
-    # 3) QA
+    # 3) QA-оценки
     def load_qa(ss_id):
         q = load_sheet_values(ss_id, QA_SHEET)
         q["Date"] = pd.to_datetime(q["B"], errors="coerce")
@@ -140,14 +142,15 @@ def build_df():
 
     return df
 
-# === UI ===
+# === UI Streamlit ===
 st.set_page_config(layout="wide")
 df = build_df()
 
+# Sidebar — фильтры
 st.sidebar.header("Filters")
 filters = {}
 for col in df.columns:
-    if df[col].dtype == "object":
+    if df[col].dtype == object or pd.api.types.is_string_dtype(df[col]):
         opts = sorted(df[col].dropna().unique())
         filters[col] = st.sidebar.multiselect(col, opts, default=opts)
 
@@ -157,8 +160,10 @@ for c, sel in filters.items():
 
 dff = df[mask]
 
-st.title("QA & Rating Dashboard")
+# Основная таблица
+st.title("📊 QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
 
+# Кнопка скачивания
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
