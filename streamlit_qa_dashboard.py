@@ -5,7 +5,7 @@ import time
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 
 # —————————————————————————————
@@ -29,9 +29,13 @@ REPL_SHEET        = "Replacement"
 @st.cache_data
 def get_client():
     import streamlit as _st
-    scope   = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or _st.secrets["GCP_SERVICE_ACCOUNT"]
-    creds   = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(sa_json), scope)
+    info    = json.loads(sa_json)
+    scopes  = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
@@ -39,11 +43,13 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
     for i in range(1, max_attempts+1):
         try:
             return func(*args, **kwargs)
-        except Exception:
-            if i == max_attempts:
-                raise
-            time.sleep(backoff)
-            backoff *= 2
+        except APIError as e:
+            code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
+            if code and 500 <= int(code) < 600 and i < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
 
 def load_sheet_values(ss_id, sheet_name):
     client = get_client()
@@ -60,7 +66,6 @@ def build_df():
     # 1) уроки
     def load_lessons(ss_id, sheet_name, region):
         raw = load_sheet_values(ss_id, sheet_name)
-        # выбираем R(17),Q(16),B(1),J(9),N(13),G(6),H(7),Y(24)
         df = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
         df.columns = [
             "Tutor name","Tutor ID","Date of the lesson","Group",
@@ -93,9 +98,9 @@ def build_df():
 
     df = (
         df
-        .merge(r_lat, on="Tutor ID", how="left", suffixes=("", "_drop"))
+        .merge(r_lat, on="Tutor ID", how="left")
         .where(df["Region"]=="LATAM", df)
-        .merge(r_brz, on="Tutor ID", how="left", suffixes=("", "_drop"))
+        .merge(r_brz, on="Tutor ID", how="left")
         .where(df["Region"]=="Brazil", df)
     )
 
