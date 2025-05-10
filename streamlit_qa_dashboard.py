@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
 from gspread.exceptions import APIError
 
@@ -39,7 +39,7 @@ def get_client():
     sa_json = sa_json or st.secrets["GCP_SERVICE_ACCOUNT"]
     import json
     info    = json.loads(sa_json)
-    creds   = Credentials.from_service_account_info(
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
         info,
         scopes=[
             "https://spreadsheets.google.com/feeds",
