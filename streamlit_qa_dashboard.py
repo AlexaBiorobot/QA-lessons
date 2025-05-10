@@ -6,13 +6,13 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
-from gspread_dataframe import set_with_dataframe
+from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import APIError
 
 # === Constants (жестко прописаны) ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
-LATAM_GID        = "0"           # gid листа "lessons LATAM"
-BRAZIL_GID       = "835553195"   # gid листа "lessons Brazil"
+LATAM_GID        = "0"
+BRAZIL_GID       = "835553195"
 
 RATING_LATAM_SS  = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING_BRAZIL_SS = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
@@ -28,13 +28,11 @@ REPL_SHEET       = "Replacement"
 
 @st.cache_data(show_spinner=False)
 def get_client():
+    """Авторизация через oauth2client для GSpread."""
     import json
-    from oauth2client.service_account import ServiceAccountCredentials
 
-    # 1) пытаемся из ENV (GitHub Actions и т.п.)
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
     if not sa_json:
-        # 2) fallback на Secrets Streamlit Cloud
         sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
     info = json.loads(sa_json)
 
@@ -49,12 +47,11 @@ def get_client():
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
     """Retry при 5xx APIError."""
     backoff = initial_backoff
-    for i in range(1, max_attempts+1):
+    for i in range(1, max_attempts + 1):
         try:
             return func(*args, **kwargs)
         except APIError as e:
-            code = getattr(e.response, "status_code", None) \
-                   or getattr(e.response, "status", None)
+            code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
             if code and 500 <= int(code) < 600 and i < max_attempts:
                 time.sleep(backoff)
                 backoff *= 2
@@ -63,12 +60,11 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 
 
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
-    """Чтение public CSV-экспорта Lessons LATAM/Brazil."""
     url  = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
     resp = requests.get(url)
     resp.raise_for_status()
     df   = pd.read_csv(io.StringIO(resp.text), dtype=str)
-    df   = df.iloc[:, [17,16,1,9,13,6,7,24]].copy()  # R,Q,B,J,N,G,H,Y
+    df   = df.iloc[:, [17,16,1,9,13,6,7,24]].copy()
     df.columns = [
         "Tutor name","Tutor ID","Date of the lesson","Group",
         "Course ID","Module","Lesson","Lesson Link"
@@ -79,7 +75,6 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
 
 
 def load_sheet_with_header2(ss_id: str, sheet_name: str) -> pd.DataFrame:
-    """То же, что load_sheet_values, но шапка во второй строке."""
     client = get_client()
     sh     = api_retry(client.open_by_key, ss_id)
     ws     = api_retry(sh.worksheet, sheet_name)
@@ -87,14 +82,12 @@ def load_sheet_with_header2(ss_id: str, sheet_name: str) -> pd.DataFrame:
 
     if len(rows) < 2:
         raise RuntimeError(f"Лист «{sheet_name}» слишком короткий")
-    # в rows[1] настоящая шапка, данные с 2-й строки (индекс 2 и дальше)
     header = rows[1]
     data   = rows[2:]
 
     maxc   = max(len(header), *(len(r) for r in data))
     header = header + [""]*(maxc - len(header))
     data   = [r + [""]*(maxc - len(r)) for r in data]
-
     return pd.DataFrame(data, columns=header)
 
 
@@ -107,7 +100,6 @@ def build_df() -> pd.DataFrame:
 
     # 2) Rating
     def load_rating(ss_id: str) -> pd.DataFrame:
-        # используем функцию с header_row=1
         r = load_sheet_with_header2(ss_id, RATING_SHEET)
         cols = [
             "Tutor",
@@ -127,15 +119,15 @@ def build_df() -> pd.DataFrame:
 
     df = (
         df
-        .merge(r_lat, on="Tutor ID", how="left")
+        .merge(r_lat, on="ID", how="left")
         .where(df["Region"]=="LATAM", df)
-        .merge(r_brz, on="Tutor ID", how="left")
+        .merge(r_brz, on="ID", how="left")
         .where(df["Region"]=="Brazil", df)
     )
 
     # 3) QA
     def load_qa(ss_id: str) -> pd.DataFrame:
-        q = load_sheet_values(ss_id, QA_SHEET)
+        q = load_sheet_with_header2(ss_id, QA_SHEET)
         q["Date"] = pd.to_datetime(q["B"], errors="coerce")
         return (
             q[["A","E","Date","C","D"]]
@@ -154,7 +146,7 @@ def build_df() -> pd.DataFrame:
     )
 
     # 4) Replacement
-    rp = load_sheet_values(REPL_SS, REPL_SHEET)
+    rp = load_sheet_with_header2(REPL_SS, REPL_SHEET)
     rp["Date"]  = pd.to_datetime(rp["D"], errors="coerce")
     rp["Group"] = rp["F"]
     rp = rp[["Date","Group"]].assign(**{"Replacement or not":"Replacement/Postponement"})
@@ -167,7 +159,6 @@ def build_df() -> pd.DataFrame:
     )
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
-    # Важно: в конце build_df() — вернуть df!
     return df
 
 
@@ -175,7 +166,6 @@ def build_df() -> pd.DataFrame:
 st.set_page_config(layout="wide")
 df = build_df()
 
-# Sidebar filters
 st.sidebar.header("Filters")
 filters = {}
 for col in df.columns:
@@ -191,6 +181,5 @@ dff = df[mask]
 st.title("📊 QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
 
-# Download CSV
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
