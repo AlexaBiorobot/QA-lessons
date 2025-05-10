@@ -62,34 +62,41 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 
 
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
-    url  = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    resp = requests.get(url)
-    resp.raise_for_status()
-    df   = pd.read_csv(io.StringIO(resp.text), dtype=str)
-    df   = df.iloc[:, [17,16,1,9,13,6,7,24]].copy()
+    url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
+    try:
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        df   = pd.read_csv(io.StringIO(resp.text), dtype=str)
+    except (pd.errors.EmptyDataError, requests.RequestException):
+        # Фид пустой или запрос упал — читаем через GSpread
+        raw = load_sheet_values(ss_id, sheet_name=None, gid=gid)
+        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
+
+    # далее переименовываем колонки и парсим дату
     df.columns = [
         "Tutor name","Tutor ID","Date of the lesson","Group",
         "Course ID","Module","Lesson","Lesson Link"
     ]
-    df["Region"] = region
+    df["Region"]             = region
     df["Date of the lesson"] = pd.to_datetime(df["Date of the lesson"], errors="coerce")
     return df
 
 
-def load_sheet_with_header2(ss_id: str, sheet_name: str) -> pd.DataFrame:
+def load_sheet_values(ss_id, sheet_name=None, gid=None):
     client = get_client()
     sh     = api_retry(client.open_by_key, ss_id)
-    ws     = api_retry(sh.worksheet, sheet_name)
-    rows   = api_retry(ws.get_all_values)
 
-    if len(rows) < 2:
-        raise RuntimeError(f"Лист «{sheet_name}» слишком короткий")
-    header = rows[1]
-    data   = rows[2:]
+    if sheet_name:
+        ws = api_retry(sh.worksheet, sheet_name)
+    else:
+        # когда sheet_name==None, найдём вкладку по числовому GID
+        ws = next(w for w in sh.worksheets() if str(w.id) == str(gid))
 
-    maxc   = max(len(header), *(len(r) for r in data))
-    header = header + [""]*(maxc - len(header))
-    data   = [r + [""]*(maxc - len(r)) for r in data]
+    rows = api_retry(ws.get_all_values)
+    # выравниваем все строки по одной длине
+    maxc   = max(len(r) for r in rows)
+    header = rows[0] + [""]*(maxc - len(rows[0]))
+    data   = [r + [""]*(maxc - len(r)) for r in rows[1:]]
     return pd.DataFrame(data, columns=header)
 
 
