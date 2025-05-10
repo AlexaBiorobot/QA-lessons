@@ -2,6 +2,7 @@
 import time
 import io
 import os
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -9,7 +10,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import APIError
 
-# === Constants (жестко прописаны) ===
+# === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 LATAM_GID        = "0"
 BRAZIL_GID       = "835553195"
@@ -25,31 +26,22 @@ QA_SHEET         = "QA - Lesson evaluation"
 REPL_SS          = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 REPL_SHEET       = "Replacement"
 
-
+# === Auth & helpers ===
 @st.cache_data(show_spinner=False)
 def get_client():
     import json
-    from oauth2client.service_account import ServiceAccountCredentials
-
-    # 1) сначала пробуем из ENV (удобно для Actions)
-    sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
-    if not sa_json:
-        # 2) fallback на Streamlit Secrets
-        sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
-    info = json.loads(sa_json)
-
-    scope = [
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets["GCP_SERVICE_ACCOUNT"]
+    info    = json.loads(sa_json)
+    scope   = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
     ]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
     return gspread.authorize(creds)
 
-
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
-    """Retry при 5xx APIError."""
     backoff = initial_backoff
-    for i in range(1, max_attempts + 1):
+    for i in range(1, max_attempts+1):
         try:
             return func(*args, **kwargs)
         except APIError as e:
@@ -60,87 +52,93 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
-
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
+    """Читаем публично через CSV-export, fallback на GSpread если пусто."""
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
     try:
         resp = requests.get(url, timeout=20)
         resp.raise_for_status()
-        df   = pd.read_csv(io.StringIO(resp.text), dtype=str)
+        df = pd.read_csv(io.StringIO(resp.text), dtype=str)
+        df = df.iloc[:, [17,16,1,9,13,6,7,24]]  # R,Q,B,J,N,G,H,Y
     except (pd.errors.EmptyDataError, requests.RequestException):
-        # Фид пустой или запрос упал — читаем через GSpread
+        # если пусто или таймаут — читаем через GSpread
         raw = load_sheet_values(ss_id, sheet_name=None, gid=gid)
-        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]].copy()
-
-    # далее переименовываем колонки и парсим дату
+        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]]
     df.columns = [
         "Tutor name","Tutor ID","Date of the lesson","Group",
         "Course ID","Module","Lesson","Lesson Link"
     ]
-    df["Region"]             = region
+    df["Region"] = region
     df["Date of the lesson"] = pd.to_datetime(df["Date of the lesson"], errors="coerce")
     return df
 
-
-def load_sheet_values(ss_id, sheet_name=None, gid=None) -> pd.DataFrame:
-    """
-    Универсальная GSpread-функция.
-    Если sheet_name указан — читаем его, иначе ищем вкладку по GID.
-    Возвращаем DataFrame со всеми колонками, ровняем по ширине.
-    """
+def load_sheet_values(ss_id: str, sheet_name: str = None, gid: str = None) -> pd.DataFrame:
+    """Универсальное чтение: если sheet_name задан — по имени, иначе — по gid."""
     client = get_client()
     sh     = api_retry(client.open_by_key, ss_id)
-
     if sheet_name:
         ws = api_retry(sh.worksheet, sheet_name)
     else:
-        # ищем вкладку по numeric GID
+        # ищем вкладку по numeric gid
         ws = next(w for w in api_retry(sh.worksheets) if str(w.id) == str(gid))
-
     rows = api_retry(ws.get_all_values)
-    maxc   = max(len(r) for r in rows)
+    maxc = max(len(r) for r in rows)
     header = rows[0] + [""]*(maxc - len(rows[0]))
-    data   = [r + [""]*(maxc - len(r)) for r in rows[1:]]
+    data = [r + [""]*(maxc - len(r)) for r in rows[1:]]
     return pd.DataFrame(data, columns=header)
 
-
+# === Основная сборка данных ===
 @st.cache_data(show_spinner=True)
 def build_df() -> pd.DataFrame:
-    # 1) Lessons
+    # 1) уроки
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID,  "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # 2) Rating
+    # 2) рейтинг
     def load_rating(ss_id: str) -> pd.DataFrame:
-        r = load_sheet_with_header2(ss_id, RATING_SHEET)
+        client = get_client()
+        sh     = api_retry(client.open_by_key, ss_id)
+        ws     = api_retry(sh.worksheet, RATING_SHEET)
+        rows   = api_retry(ws.get_all_values)
+        # заголовок — в строке 1, данные — со 2-й
+        header = rows[1]
+        data   = rows[2:]
+        maxc   = max(len(header), *(len(r) for r in data))
+        header = header + [""]*(maxc - len(header))
+        data   = [r + [""]*(maxc - len(r)) for r in data]
+        r = pd.DataFrame(data, columns=header)
+        # выбрали нужные колонки (проверьте точные названия в вашей таблице!)
         cols = [
-            "Tutor",
-            "ID",
+            "Tutor ID",   # или "ID" — подставьте то, что реально у вас во второй строке
             "Rating",
             "Num of QA scores",
             "Num of QA scores (last 90 days)",
             "Average QA score",
             "Average QA score (last 2 scores within last 90 days)",
             "Average QA marker",
-            "Average QA marker (last 2 markers within last 90 days)"
+            "Average QA marker (last 2 markers within last 90 days)",
         ]
+        # если у вас там столбец называется "ID", то:
+        if "ID" in r.columns and "Tutor ID" not in r.columns:
+            r = r.rename(columns={"ID": "Tutor ID"})
         return r[cols]
 
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
 
+    # merge по региону
     df = (
         df
-        .merge(r_lat, on="ID", how="left")
+        .merge(r_lat, on="Tutor ID", how="left")
         .where(df["Region"]=="LATAM", df)
-        .merge(r_brz, on="ID", how="left")
+        .merge(r_brz, on="Tutor ID", how="left")
         .where(df["Region"]=="Brazil", df)
     )
 
-    # 3) QA
+    # 3) QA оценки (шапка в первой строке)
     def load_qa(ss_id: str) -> pd.DataFrame:
-        q = load_sheet_with_header2(ss_id, QA_SHEET)
+        q = load_sheet_values(ss_id, sheet_name=QA_SHEET)
         q["Date"] = pd.to_datetime(q["B"], errors="coerce")
         return (
             q[["A","E","Date","C","D"]]
@@ -159,7 +157,7 @@ def build_df() -> pd.DataFrame:
     )
 
     # 4) Replacement
-    rp = load_sheet_with_header2(REPL_SS, REPL_SHEET)
+    rp = load_sheet_values(REPL_SS, sheet_name=REPL_SHEET)
     rp["Date"]  = pd.to_datetime(rp["D"], errors="coerce")
     rp["Group"] = rp["F"]
     rp = rp[["Date","Group"]].assign(**{"Replacement or not":"Replacement/Postponement"})
@@ -173,7 +171,6 @@ def build_df() -> pd.DataFrame:
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
     return df
-
 
 # === Streamlit UI ===
 st.set_page_config(layout="wide")
@@ -194,5 +191,6 @@ dff = df[mask]
 st.title("📊 QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
 
+# Скачать CSV
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
