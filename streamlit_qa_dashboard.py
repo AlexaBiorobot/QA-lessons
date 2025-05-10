@@ -82,18 +82,22 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     return df
 
 
-def load_sheet_values(ss_id, sheet_name=None, gid=None):
+def load_sheet_values(ss_id, sheet_name=None, gid=None) -> pd.DataFrame:
+    """
+    Универсальная GSpread-функция.
+    Если sheet_name указан — читаем его, иначе ищем вкладку по GID.
+    Возвращаем DataFrame со всеми колонками, ровняем по ширине.
+    """
     client = get_client()
     sh     = api_retry(client.open_by_key, ss_id)
 
     if sheet_name:
         ws = api_retry(sh.worksheet, sheet_name)
     else:
-        # когда sheet_name==None, найдём вкладку по числовому GID
-        ws = next(w for w in sh.worksheets() if str(w.id) == str(gid))
+        # ищем вкладку по numeric GID
+        ws = next(w for w in api_retry(sh.worksheets) if str(w.id) == str(gid))
 
     rows = api_retry(ws.get_all_values)
-    # выравниваем все строки по одной длине
     maxc   = max(len(r) for r in rows)
     header = rows[0] + [""]*(maxc - len(rows[0]))
     data   = [r + [""]*(maxc - len(r)) for r in rows[1:]]
