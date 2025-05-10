@@ -28,11 +28,13 @@ REPL_SHEET       = "Replacement"
 
 @st.cache_data(show_spinner=False)
 def get_client():
-    """Авторизация через oauth2client для GSpread."""
     import json
+    from oauth2client.service_account import ServiceAccountCredentials
 
+    # 1) сначала пробуем из ENV (удобно для Actions)
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
     if not sa_json:
+        # 2) fallback на Streamlit Secrets
         sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
     info = json.loads(sa_json)
 
