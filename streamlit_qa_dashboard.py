@@ -108,20 +108,21 @@ def build_df() -> pd.DataFrame:
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-def load_rating(ss_id: str) -> pd.DataFrame:
-    # используем функцию с header_row=1
-    r = load_sheet_with_header2(ss_id, RATING_SHEET)
-    cols = [
-        "Tutor ID",
-        "Rating",
-        "Num of QA scores",
-        "Num of QA scores (last 90 days)",
-        "Average QA score",
-        "Average QA score (last 2 scores within last 90 days)",
-        "Average QA marker",
-        "Average QA marker (last 2 markers within last 90 days)"
-    ]
-    return r[cols]
+    # 2) Rating
+    def load_rating(ss_id: str) -> pd.DataFrame:
+        # используем функцию с header_row=1
+        r = load_sheet_with_header2(ss_id, RATING_SHEET)
+        cols = [
+            "Tutor ID",
+            "Rating",
+            "Num of QA scores",
+            "Num of QA scores (last 90 days)",
+            "Average QA score",
+            "Average QA score (last 2 scores within last 90 days)",
+            "Average QA marker",
+            "Average QA marker (last 2 markers within last 90 days)"
+        ]
+        return r[cols]
 
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
@@ -168,6 +169,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     )
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
+    # Важно: в конце build_df() — вернуть df!
     return df
 
 
