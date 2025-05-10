@@ -6,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
 from gspread.exceptions import APIError
 
@@ -29,23 +28,21 @@ REPL_SHEET       = "Replacement"
 
 @st.cache_data(show_spinner=False)
 def get_client():
-    """Авторизация сервис-аккаунтом для gspread."""
-    # читаем JSON из переменной окружения или из Secrets Streamlit Cloud
-    sa_json = (
-        st.secrets.get("GCP_SERVICE_ACCOUNT")
-        if not (env := st.secrets.get("GCP_SERVICE_ACCOUNT", None))
-        else env
-    )
-    sa_json = sa_json or st.secrets["GCP_SERVICE_ACCOUNT"]
     import json
-    info    = json.loads(sa_json)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        info,
-        scopes=[
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-        ],
-    )
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    # 1) пытаемся из ENV (GitHub Actions и т.п.)
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
+    if not sa_json:
+        # 2) fallback на Secrets Streamlit Cloud
+        sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
+    info = json.loads(sa_json)
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
     return gspread.authorize(creds)
 
 
