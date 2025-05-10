@@ -113,7 +113,8 @@ def build_df() -> pd.DataFrame:
         # используем функцию с header_row=1
         r = load_sheet_with_header2(ss_id, RATING_SHEET)
         cols = [
-            "Tutor ID",
+            "Tutor",
+            "ID",
             "Rating",
             "Num of QA scores",
             "Num of QA scores (last 90 days)",
