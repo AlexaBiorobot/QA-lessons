@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
+from gspread.exceptions import APIError
 
 # … ваш импорт Credentials …
 from google.oauth2.service_account import Credentials
