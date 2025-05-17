@@ -4,14 +4,9 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
+
 from gspread.exceptions import APIError
-
-# … ваш импорт Credentials …
 from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import AuthorizedSession
-
-# Monkey-patch для gspread
-AuthorizedSession._auth_request = AuthorizedSession.request
 
 # === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
@@ -33,14 +28,21 @@ REPL_SHEET       = "Replacement"
 @st.cache_data(show_spinner=False)
 def get_client():
     import json
-    sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets["GCP_SERVICE_ACCOUNT"]
-    info    = json.loads(sa_json)
 
-    # Обратите внимание: переменная называется "scopes" (во множественном числе)
+    # 1) Сначала пробуем взять JSON из переменной окружения
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
+    if sa_json:
+        info = json.loads(sa_json)
+    else:
+        # 2) Иначе — из streamlit secrets (он уже dict)
+        info = st.secrets["GCP_SERVICE_ACCOUNT"]
+
+    # 3) Скоупы для Sheets + Drive
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
+
     creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
 
