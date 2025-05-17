@@ -8,6 +8,9 @@ import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 
+from google.auth.transport.requests import AuthorizedSession
+AuthorizedSession._auth_request = AuthorizedSession.request
+
 # === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 LATAM_GID        = "0"
