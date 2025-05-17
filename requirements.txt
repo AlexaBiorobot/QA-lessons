@@ -1,6 +1,7 @@
-gspread
+gspread>=5.0.0
 oauth2client
 pandas
 gspread-dataframe
 requests
 streamlit
+google-auth>=2.0.0
