@@ -5,6 +5,8 @@ import pandas as pd
 import requests
 import gspread
 print("gspread version:", gspread.__version__)
+from gspread.exceptions import APIError
+from google.auth.exceptions import GoogleAuthError
 
 from google.auth.transport.requests import AuthorizedSession
 AuthorizedSession._auth_request = AuthorizedSession.request
