@@ -53,21 +53,29 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
             raise
 
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
-    """Читаем публично через CSV-export, fallback на GSpread если пусто."""
+    """Читаем публично через CSV-export, fallback на GSpread если пусто.
+       При отсутствии нужных колонок — подставляем пустые."""
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
     try:
         resp = requests.get(url, timeout=20)
         resp.raise_for_status()
-        df = pd.read_csv(io.StringIO(resp.text), dtype=str)
-        df = df.iloc[:, [17,16,1,9,13,6,7,24]]  # R,Q,B,J,N,G,H,Y
+        raw = pd.read_csv(io.StringIO(resp.text), dtype=str)
     except (pd.errors.EmptyDataError, requests.RequestException):
-        # если пусто или таймаут — читаем через GSpread
         raw = load_sheet_values(ss_id, sheet_name=None, gid=gid)
-        df  = raw.iloc[:, [17,16,1,9,13,6,7,24]]
+
+    # нужные исходные заголовки в вашем GS-списке
+    wanted = ["R", "Q", "B", "J", "N", "G", "H", "Y"]
+    # если кто-то пропал — добавляем колонку с NaN (или пустой строкой)
+    for col in wanted:
+        if col not in raw.columns:
+            raw[col] = pd.NA
+    # теперь точно можно резать по ним
+    df = raw[wanted]
     df.columns = [
         "Tutor name","Tutor ID","Date of the lesson","Group",
         "Course ID","Module","Lesson","Lesson Link"
     ]
+
     df["Region"] = region
     df["Date of the lesson"] = pd.to_datetime(df["Date of the lesson"], errors="coerce")
     return df
