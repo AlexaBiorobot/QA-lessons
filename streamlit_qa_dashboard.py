@@ -35,8 +35,10 @@ def get_client():
     import json
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets["GCP_SERVICE_ACCOUNT"]
     info    = json.loads(sa_json)
-    scope   = [
-        "https://spreadsheets.google.com/feeds",
+
+    # Обратите внимание: переменная называется "scopes" (во множественном числе)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
