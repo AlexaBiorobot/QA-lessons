@@ -4,9 +4,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
-
-from gspread.exceptions import APIError
-from google.oauth2.service_account import Credentials
+print("gspread version:", gspread.__version__)
 
 from google.auth.transport.requests import AuthorizedSession
 AuthorizedSession._auth_request = AuthorizedSession.request
