@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-import time
-import io
-import os
-
+import time, io, os
 import streamlit as st
 import pandas as pd
 import requests
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from gspread.exceptions import APIError
+
+# … ваш импорт Credentials …
+from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import AuthorizedSession
+
+# Monkey-patch для gspread
+AuthorizedSession._auth_request = AuthorizedSession.request
 
 # === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
