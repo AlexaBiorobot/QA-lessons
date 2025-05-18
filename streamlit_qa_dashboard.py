@@ -69,7 +69,6 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
-    # URL-энкодим название листа, чтобы пробелы и другие спецсимволы стали %20 и т.п.
     encoded = quote(sheet_name, safe='')
     url     = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{encoded}"
     headers = get_auth_header()
@@ -131,8 +130,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    # теперь ловим ошибки и отсутствие данных
-    qa_cols = ["Tutor ID","Group","Date of the lesson","QA score","QA marker"]
+    qa_cols = ["Tutor ID","Date of the lesson","QA score","QA marker"]
     try:
         rows = fetch_values(ss_id, QA_SHEET)
     except requests.HTTPError:
@@ -141,11 +139,13 @@ def load_qa(ss_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=qa_cols)
     data = rows[1:]
     df = pd.DataFrame({
-        "Tutor ID":  [r[0] if len(r) > 0 else pd.NA for r in data],
-        "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
-        "QA score":  [r[2] if len(r) > 2 else pd.NA for r in data],
-        "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
-        "Date of the lesson": pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
+        "Tutor ID":            [r[0] if len(r) > 0 else pd.NA for r in data],
+        "QA score":            [r[2] if len(r) > 2 else pd.NA for r in data],
+        "QA marker":           [r[3] if len(r) > 3 else pd.NA for r in data],
+        "Date of the lesson":  pd.to_datetime(
+                                   [r[1] if len(r) > 1 else None for r in data],
+                                   errors="coerce"
+                               ),
     })
     return df[qa_cols]
 
@@ -170,21 +170,23 @@ def build_df():
 
     r_lat  = load_rating(RATING_LATAM_SS)
     r_brz  = load_rating(RATING_BRAZIL_SS)
-    df = (df
-          .merge(r_lat, on="Tutor ID", how="left", suffixes=("_x","_y"))
-          .merge(r_brz, on="Tutor ID", how="left"))
+    df = (
+        df
+        .merge(r_lat, on="Tutor ID", how="left", suffixes=("_x","_y"))
+        .merge(r_brz, on="Tutor ID", how="left")
+    )
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
-    df = (df
-          .merge(q_lat, on=["Tutor ID","Group","Date of the lesson"], how="left", suffixes=("_x","_y"))
-          .merge(q_brz, on=["Tutor ID","Group","Date of the lesson"], how="left"))
+    df = (
+        df
+        .merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left", suffixes=("_x","_y"))
+        .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
+    )
 
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
-
-    # Убираем лишнюю колонку Date (она дублирует Date of the lesson)
     df.drop(columns=["Date"], inplace=True)
 
     # --- объединяем рейтинговые колонки ---
