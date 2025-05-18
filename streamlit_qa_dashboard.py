@@ -109,48 +109,41 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         rows = fetch_values(ss_id, RATING_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=cols)
-    # если нет строк или только одна — возвращаем пустой
     if not rows or len(rows) == 1:
         return pd.DataFrame(columns=cols)
-
-    # определяем, где заголовки: если в первой строке есть "Tutor ID" — используем её,
-    # иначе берём вторую и сдвигаем данные соответственно
     if "Tutor ID" in rows[0]:
-        header = rows[0]
-        data   = rows[1:]
+        header, data = rows[0], rows[1:]
     else:
-        header = rows[1]
-        data   = rows[2:] if len(rows) > 2 else []
-
-    # выравниваем длины строк под header
+        header, data = rows[1], rows[2:]
     maxc   = max(len(header), *(len(r) for r in data)) if data else len(header)
     header = header + [""] * (maxc - len(header))
     data   = [r + [""] * (maxc - len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
-
-    # если раньше столбец назывался "ID" — переименуем
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID": "Tutor ID"})
-
-    # добавляем недостающие колонки
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
-
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    rows = fetch_values(ss_id, QA_SHEET)
+    # теперь ловим ошибки и отсутствие данных
+    qa_cols = ["Tutor ID","Group","Date of the lesson","QA score","QA marker"]
+    try:
+        rows = fetch_values(ss_id, QA_SHEET)
+    except requests.HTTPError:
+        return pd.DataFrame(columns=qa_cols)
+    if not rows or len(rows) < 2:
+        return pd.DataFrame(columns=qa_cols)
     data = rows[1:]
     df = pd.DataFrame({
         "Tutor ID":  [r[0] if len(r) > 0 else pd.NA for r in data],
         "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
         "QA score":  [r[2] if len(r) > 2 else pd.NA for r in data],
         "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
-        "Date":      pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
+        "Date of the lesson": pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
     })
-    df = df.rename(columns={"Date": "Date of the lesson"})
-    return df[["Tutor ID","Group","Date of the lesson","QA score","QA marker"]]
+    return df[qa_cols]
 
 def load_replacements() -> pd.DataFrame:
     rows = fetch_values(REPL_SS, REPL_SHEET)
@@ -187,7 +180,7 @@ def build_df():
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
-    # --- объединяем рейтинговые колонки _x и _y ---
+    # --- объединяем рейтинговые колонки ---
     rating_cols = [
         "Rating",
         "Num of QA scores",
