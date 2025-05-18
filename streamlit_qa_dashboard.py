@@ -37,8 +37,7 @@ def get_creds():
     return Credentials.from_service_account_info(info, scopes=scopes)
 
 def get_auth_header():
-    creds = get_creds()
-    creds.refresh(Request())
+    creds = get_creds(); creds.refresh(Request())
     return {"Authorization": f"Bearer {creds.token}"}
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
@@ -47,29 +46,26 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
         try:
             return func(*args, **kwargs)
         except requests.HTTPError as e:
-            if 500 <= e.response.status_code < 600 and i < max_attempts-1:
-                time.sleep(backoff)
-                backoff *= 2
+            if 500 <= e.response.status_code < 600 and i < max_attempts - 1:
+                time.sleep(backoff); backoff *= 2
                 continue
             raise
 
-# === Public CSV loader (no auth header!) ===
+# === CSV loader ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    resp = api_retry(requests.get, url, timeout=20)
-    resp.raise_for_status()
+    resp = api_retry(requests.get, url, timeout=20); resp.raise_for_status()
     try:
         return pd.read_csv(io.StringIO(resp.text), dtype=str)
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
 
-# === Private Sheets API loader ===
+# === Sheets-API loader ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
     encoded = quote(sheet_name, safe='')
     url     = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{encoded}"
     headers = get_auth_header()
-    resp    = api_retry(requests.get, url, headers=headers)
-    resp.raise_for_status()
+    resp    = api_retry(requests.get, url, headers=headers); resp.raise_for_status()
     return resp.json().get("values", [])
 
 # === Loaders ===
@@ -78,8 +74,7 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     cols = ["teacher_name","teacher_id","lesson_date","group_title",
             "course_id","lesson_module","lesson_number","watch_url"]
     for c in cols:
-        if c not in raw.columns:
-            raw[c] = pd.NA
+        raw[c] = raw.get(c, pd.NA)
     df = raw[cols]
     df.columns = ["Tutor name","Tutor ID","Date of the lesson","Group",
                   "Course ID","Module","Lesson","Lesson Link"]
@@ -98,10 +93,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=want)
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=want)
-    if "Tutor ID" in rows[0]:
-        header, data = rows[0], rows[1:]
-    else:
-        header, data = rows[1], rows[2:]
+    header, data = (rows[0], rows[1:]) if "Tutor ID" in rows[0] else (rows[1], rows[2:])
     maxc = max(len(header), *(len(r) for r in data))
     header = header + [""]*(maxc-len(header))
     data   = [r+[""]*(maxc-len(r)) for r in data]
@@ -109,8 +101,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID":"Tutor ID"})
     for c in want:
-        if c not in df.columns:
-            df[c] = pd.NA
+        df[c] = df.get(c, pd.NA)
     return df[want]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
@@ -122,26 +113,24 @@ def load_qa(ss_id: str) -> pd.DataFrame:
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=want)
     data = rows[1:]
-    df = pd.DataFrame({
+    return pd.DataFrame({
         "Tutor ID":           [r[6]  if len(r)>6 else pd.NA for r in data],
         "Date of the lesson": pd.to_datetime([r[1] if len(r)>1 else None for r in data],
                                              errors="coerce", dayfirst=True),
         "QA score":           [r[2]  if len(r)>2 else pd.NA for r in data],
         "QA marker":          [r[3]  if len(r)>3 else pd.NA for r in data],
     })
-    return df
 
 def load_replacements() -> pd.DataFrame:
     rows = fetch_values(REPL_SS, REPL_SHEET)
     if len(rows)<2:
         return pd.DataFrame(columns=["Date","Group","Replacement or not"])
     data = rows[1:]
-    df   = pd.DataFrame({
+    return pd.DataFrame({
         "Date":      pd.to_datetime([r[3] if len(r)>3 else None for r in data], errors="coerce"),
         "Group":     [r[5]  if len(r)>5 else pd.NA for r in data],
         "Replacement or not": "Replacement/Postponement"
     })
-    return df
 
 # === Собираем всё в один DF ===
 @st.cache_data(show_spinner=True)
@@ -150,22 +139,19 @@ def build_df():
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # — Rating
-    r_lat = load_rating(RATING_LATAM_SS)
-    r_brz = load_rating(RATING_BRAZIL_SS)
-    df = df.merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz")) \
-           .merge(r_brz, on="Tutor ID", how="left")
-    # склеиваем рейтинги обратно
+    # — Rating: переименуем, сольём и дропнем суффиксы
     rating_cols = ["Rating","Num of QA scores",
                    "Num of QA scores (last 90 days)","Average QA score",
                    "Average QA score (last 2 scores within last 90 days)",
                    "Average QA marker","Average QA marker (last 2 markers within last 90 days)"]
+    r_lat = load_rating(RATING_LATAM_SS).rename(columns={c: f"{c}_lat" for c in rating_cols})
+    r_brz = load_rating(RATING_BRAZIL_SS).rename(columns={c: f"{c}_brz" for c in rating_cols})
+    df = df.merge(r_lat, on="Tutor ID", how="left").merge(r_brz, on="Tutor ID", how="left")
     for c in rating_cols:
         df[c] = df[f"{c}_lat"].fillna(df[f"{c}_brz"])
-    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols],
-            axis=1, inplace=True)
+    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols], axis=1, inplace=True)
 
-    # — QA (объединяем LATAM и Brazil)
+    # — QA: аналогично
     q_lat = load_qa(QA_LATAM_SS).rename(columns={"QA score":"QA score_lat","QA marker":"QA marker_lat"})
     q_brz = load_qa(QA_BRAZIL_SS).rename(columns={"QA score":"QA score_brz","QA marker":"QA marker_brz"})
     df = df.merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left") \
@@ -176,7 +162,8 @@ def build_df():
 
     # — Replacements
     rp = load_replacements()
-    df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
+    df = df.merge(rp, left_on=["Date of the lesson","Group"],
+                  right_on=["Date","Group"], how="left")
     df["Replacement or not"].fillna("", inplace=True)
     df.drop(columns=["Date"], inplace=True)
 
@@ -195,12 +182,10 @@ start_date, end_date = st.sidebar.date_input(
     min_value=min_date,
     max_value=max_date
 )
-mask = (
-    (df["Date of the lesson"] >= pd.to_datetime(start_date))
-  & (df["Date of the lesson"] <= pd.to_datetime(end_date))
-)
+mask = (df["Date of the lesson"] >= pd.to_datetime(start_date)) & \
+       (df["Date of the lesson"] <= pd.to_datetime(end_date))
 
-# 2) Остальные мультиселекты (по-умолчанию пусто → не фильтрует)
+# 2) Остальные мультиселекты
 st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
@@ -211,7 +196,6 @@ filters = {
     for c in df.columns
     if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
-
 for c, sel in filters.items():
     if sel:
         mask &= df[c].isin(sel)
