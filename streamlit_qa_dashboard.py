@@ -6,8 +6,8 @@ import time
 import streamlit as st
 import pandas as pd
 import requests
-from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
+from google.oauth2.service_account import Credentials
 
 # === Streamlit config ===
 import gspread  # нужно лишь для проверки версии
@@ -37,15 +37,18 @@ def get_session() -> AuthorizedSession:
     Возвращает AuthorizedSession, который умеет делать
     подпись OAuth на каждый запрос.
     """
+    import json
     raw = os.getenv("GCP_SERVICE_ACCOUNT")
     if raw:
-        import json
         info = json.loads(raw)
     else:
         info = st.secrets["GCP_SERVICE_ACCOUNT"]
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
-    return AuthorizedSession(creds)
+
+    session = AuthorizedSession(creds)
+    session._auth_request = session.request
+    return session
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
     backoff = initial_backoff
