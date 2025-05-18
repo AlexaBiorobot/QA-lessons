@@ -30,7 +30,6 @@ REPL_SS          = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 REPL_SHEET       = "Replacement"
 
 # === Auth helpers ===
-@st.cache_data(show_spinner=False)
 def get_session() -> AuthorizedSession:
     """
     Возвращает AuthorizedSession, который умеет делать
