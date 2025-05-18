@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
+from urllib.parse import quote
 
 # === Константы ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
@@ -67,10 +68,11 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
-    quoted = urllib.parse.quote(f"'{sheet_name}'", safe='')
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{quoted}"
+    # оборачиваем sheet_name в одинарные кавычки и URL-энкодим
+    quoted = quote(f"'{sheet_name}'", safe='')
+    url    = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{quoted}"
     headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers)
+    resp    = api_retry(requests.get, url, headers=headers)
     resp.raise_for_status()
     return resp.json().get("values", [])
 
