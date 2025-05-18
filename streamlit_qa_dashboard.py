@@ -69,9 +69,14 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{sheet_name}"
     headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers)
-    resp.raise_for_status()
-    return resp.json().get("values", [])
+    try:
+        # ставим таймаут 20 секунд и ловим все сетевые исключения
+        resp = api_retry(requests.get, url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        return resp.json().get("values", [])
+    except requests.RequestException as e:
+        st.warning(f"Не удалось загрузить лист `{sheet_name}`: {e}")
+        return []
 
 # === Ваши загрузчики ===
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
