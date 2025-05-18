@@ -60,36 +60,10 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    # пробуем Web-экспорт первым
-    resp = requests.get(url, timeout=20)
+    headers = get_auth_header()
+    resp = api_retry(requests.get, url, headers=headers, timeout=20)
     resp.raise_for_status()
-    text = resp.text.strip()
-    # если вместо CSV вернулся HTML (Sign-in page или ошибка), падаем в API-фоллбек
-    if text.lower().startswith("<html") or text.lower().startswith("<!doctype"):
-        # узнаём title листа по sheetId через API v4
-        meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?fields=sheets.properties"
-        headers = get_auth_header()
-        m = api_retry(requests.get, meta_url, headers=headers)
-        m.raise_for_status()
-        sheets = m.json().get("sheets", [])
-        title = None
-        for s in sheets:
-            p = s.get("properties", {})
-            if str(p.get("sheetId")) == gid:
-                title = p.get("title")
-                break
-        if not title:
-            raise ValueError(f"Не найден лист с gid={gid} в {ss_id}")
-        # вытягиваем всё через API в сырой список
-        rows = fetch_values(ss_id, title)
-        if not rows:
-            return pd.DataFrame()
-        header, data = rows[0], rows[1:]
-        # строим DataFrame
-        return pd.DataFrame(data, columns=header)
-    else:
-        # CSV в порядке
-        return pd.read_csv(io.StringIO(text), dtype=str)
+    return pd.read_csv(io.StringIO(resp.text), dtype=str)
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
@@ -102,7 +76,17 @@ def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
 # === Ваши загрузчики ===
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     raw = fetch_csv(ss_id, gid)
-    wanted = ["teacher_name","teacher_id","lesson_date","group_title","course_id","lesson_module","lesson_number","watch_url"]
+    # теперь реальные имена колонок из CSV
+    wanted = [
+        "teacher_name",
+        "teacher_id",
+        "lesson_date",
+        "group_title",
+        "course_id",
+        "lesson_module",
+        "lesson_number",
+        "watch_url"
+    ]
     for c in wanted:
         if c not in raw.columns:
             raw[c] = pd.NA
