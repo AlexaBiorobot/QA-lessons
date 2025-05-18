@@ -178,13 +178,18 @@ def build_df():
 df = build_df()
 st.sidebar.header("Filters")
 filters = {
-    c: st.sidebar.multiselect(c, sorted(df[c].dropna().unique()), default=sorted(df[c].dropna().unique()))
+    c: st.sidebar.multiselect(
+        c,
+        sorted(df[c].dropna().unique()),
+        default=[]             # пустой список по-умолчанию
+    )
     for c in df.columns if df[c].dtype == object
 }
 
 mask = pd.Series(True, index=df.index)
 for c, sel in filters.items():
-    mask &= df[c].isin(sel)
+    if sel:                    # фильтруем только если что-то выбрано
+        mask &= df[c].isin(sel)
 dff = df[mask]
 
 st.title("📊 QA & Rating Dashboard")
