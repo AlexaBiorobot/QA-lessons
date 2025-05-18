@@ -211,7 +211,22 @@ def build_df():
 
 # === Streamlit UI ===
 df = build_df()
-st.sidebar.header("Filters")
+
+# --- Фильтр по диапазону дат урока ---
+st.sidebar.header("Дата урока")
+min_date = df["Date of the lesson"].min()
+max_date = df["Date of the lesson"].max()
+start_date, end_date = st.sidebar.date_input(
+    "Выберите диапазон дат",
+    value=[min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
+)
+mask = (df["Date of the lesson"] >= pd.to_datetime(start_date)) & \
+       (df["Date of the lesson"] <= pd.to_datetime(end_date))
+
+# --- Остальные фильтры ---
+st.sidebar.header("Фильтры")
 filters = {
     c: st.sidebar.multiselect(
         c,
@@ -222,10 +237,10 @@ filters = {
     if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
 
-mask = pd.Series(True, index=df.index)
 for c, sel in filters.items():
     if sel:
         mask &= df[c].isin(sel)
+
 dff = df[mask]
 
 st.title("📊 QA & Rating Dashboard")
