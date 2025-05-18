@@ -163,11 +163,23 @@ def build_df():
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # Рейтинг
-    r_lat  = load_rating(RATING_LATAM_SS)
-    r_brz  = load_rating(RATING_BRAZIL_SS)
-    df = df.merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz")) \
+    rating_cols = [
+        "Rating","Num of QA scores","Num of QA scores (last 90 days)",
+        "Average QA score","Average QA score (last 2 scores within last 90 days)",
+        "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
+    ]
+    r_lat = (load_rating(RATING_LATAM_SS)
+             .rename(columns={c: c + "_lat" for c in rating_cols}))
+    r_brz = (load_rating(RATING_BRAZIL_SS)
+             .rename(columns={c: c + "_brz" for c in rating_cols}))
+    df = df.merge(r_lat, on="Tutor ID", how="left") \
            .merge(r_brz, on="Tutor ID", how="left")
+
+    # --- Склеиваем рейтинговые колонки обратно и отбрасываем суффиксы ---
+    for c in rating_cols:
+        df[c] = df[f"{c}_lat"].fillna(df[f"{c}_brz"])
+    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols],
+            axis=1, inplace=True)
 
     # QA: сначала LATAM, переименуем поля
     q_lat = load_qa(QA_LATAM_SS).rename(
@@ -197,6 +209,23 @@ def build_df():
 # === Streamlit UI ===
 df = build_df()
 
+# 1) Фильтр по диапазону дат урока (вставить перед блоком «Filters»)
+st.sidebar.header("Lesson date")
+min_date = df["Date of the lesson"].min()
+max_date = df["Date of the lesson"].max()
+start_date, end_date = st.sidebar.date_input(
+    "Choose lesson dates",
+    value=[min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
+)
+# начинаем с маски по дате
+mask = (
+    (df["Date of the lesson"] >= pd.to_datetime(start_date))
+  & (df["Date of the lesson"] <= pd.to_datetime(end_date))
+)
+
+# 2) Остальные мультиселекты
 st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
@@ -208,10 +237,11 @@ filters = {
     if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
 
-mask = pd.Series(True, index=df.index)
+# добавляем остальные условия к той же маске
 for c, sel in filters.items():
     if sel:
         mask &= df[c].isin(sel)
+
 dff = df[mask]
 
 st.title("📊 QA & Rating Dashboard")
