@@ -8,7 +8,6 @@ st.set_page_config(layout="wide")
 
 import pandas as pd
 import requests
-from requests.exceptions import RequestException
 from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 
@@ -58,19 +57,35 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
-# === CSV-экспорт для публичных листов ===
+# === CSV-экспорт для публичных листов (переделан через API v4) ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
-    url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    # public sheet: no auth header
-    resp = api_retry(requests.get, url, timeout=20)
+    # сначала вытягиваем список sheets и находим title по sheetId
+    meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?fields=sheets.properties"
+    headers = get_auth_header()
+    resp = api_retry(requests.get, meta_url, headers=headers)
     resp.raise_for_status()
-    return pd.read_csv(io.StringIO(resp.text), dtype=str)
+    sheets = resp.json().get("sheets", [])
+    sheet_name = None
+    for s in sheets:
+        prop = s.get("properties", {})
+        if str(prop.get("sheetId")) == gid:
+            sheet_name = prop.get("title")
+            break
+    if sheet_name is None:
+        raise ValueError(f"Sheet with gid {gid} not found in {ss_id}")
+    # теперь тащим сами значения через API v4
+    rows = fetch_values(ss_id, sheet_name)
+    if not rows:
+        return pd.DataFrame()
+    header = rows[0]
+    data = rows[1:]
+    return pd.DataFrame(data, columns=header)
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{sheet_name}"
     headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers, timeout=20)
+    resp = api_retry(requests.get, url, headers=headers)
     resp.raise_for_status()
     return resp.json().get("values", [])
 
@@ -100,7 +115,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
 
     try:
         rows = fetch_values(ss_id, RATING_SHEET)
-    except RequestException:
+    except requests.HTTPError:
         return pd.DataFrame(columns=cols)
 
     if len(rows) < 2:
@@ -123,50 +138,26 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    cols = ["Tutor ID","Group","Date of the lesson","QA score","QA marker"]
-
-    try:
-        rows = fetch_values(ss_id, QA_SHEET)
-    except RequestException:
-        return pd.DataFrame(columns=cols)
-
-    if len(rows) < 2:
-        return pd.DataFrame(columns=cols)
-
+    rows = fetch_values(ss_id, QA_SHEET)
     data = rows[1:]
     df = pd.DataFrame({
         "Tutor ID":  [r[0] if len(r) > 0 else pd.NA for r in data],
         "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
         "QA score":  [r[2] if len(r) > 2 else pd.NA for r in data],
         "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
-        "Date of the lesson": pd.to_datetime(
-            [r[1] if len(r) > 1 else None for r in data],
-            errors="coerce"
-        ),
+        "Date":      pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
     })
-    return df[cols]
+    df = df.rename(columns={"Date": "Date of the lesson"})
+    return df[["Tutor ID","Group","Date of the lesson","QA score","QA marker"]]
 
 def load_replacements() -> pd.DataFrame:
-    cols = ["Date","Group","Replacement or not"]
-    try:
-        rows = fetch_values(REPL_SS, REPL_SHEET)
-    except RequestException:
-        return pd.DataFrame(columns=cols)
-
+    rows = fetch_values(REPL_SS, REPL_SHEET)
     if len(rows) < 2:
-        return pd.DataFrame(columns=cols)
-
-    header = rows[0]
+        return pd.DataFrame(columns=["Date","Group","Replacement or not"])
     data = rows[1:]
-    date_idx  = header.index("Date")  if "Date"  in header else 3
-    group_idx = header.index("Group") if "Group" in header else 5
-
     df = pd.DataFrame({
-        "Date":  pd.to_datetime(
-            [r[date_idx] if len(r) > date_idx else None for r in data],
-            errors="coerce"
-        ),
-        "Group": [r[group_idx] if len(r) > group_idx else pd.NA for r in data],
+        "Date": pd.to_datetime([r[3] if len(r) > 3 else None for r in data], errors="coerce"),
+        "Group": [r[5] if len(r) > 5 else pd.NA for r in data],
     })
     df["Replacement or not"] = "Replacement/Postponement"
     return df
@@ -199,11 +190,7 @@ def build_df():
 df = build_df()
 st.sidebar.header("Filters")
 filters = {
-    c: st.sidebar.multiselect(
-        c,
-        sorted(df[c].dropna().unique()),
-        default=sorted(df[c].dropna().unique())
-    )
+    c: st.sidebar.multiselect(c, sorted(df[c].dropna().unique()), default=sorted(df[c].dropna().unique()))
     for c in df.columns if df[c].dtype == object
 }
 
