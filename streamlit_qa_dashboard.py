@@ -7,6 +7,7 @@ import streamlit as st
 st.set_page_config(layout="wide")
 
 import pandas as pd
+import pandas.api.types as pt
 import requests
 from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
@@ -216,9 +217,8 @@ filters = {
         sorted(df[c].dropna().unique()),
         default=[]
     )
-    # теперь захватываем и object, и числовые колонки
     for c in df.columns
-    if df[c].dtype == object or pd.api.types.is_numeric_dtype(df[c])
+    if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
 
 mask = pd.Series(True, index=df.index)
