@@ -176,17 +176,10 @@ def build_df():
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
-
-    df = df.merge(
-        q_lat,
-        on=["Tutor name","Date of the lesson"],
-        how="left",
-        suffixes=(None, "_lat")
-    ).merge(
-        q_brz,
-        on=["Tutor name","Date of the lesson"],
-        how="left",
-        suffixes=(None, "_brz")
+    df = (
+        df
+        .merge(q_lat, on=["Tutor name","Date of the lesson"], how="left")
+        .merge(q_brz, on=["Tutor name","Date of the lesson"], how="left", suffixes=(None,"_brz"))
     )
 
     rp = load_replacements()
@@ -208,32 +201,16 @@ def build_df():
         df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
         df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
 
-    # --- и для QA полей ---
+    # --- объединяем QA-поля ---
     for col in ["QA score","QA marker"]:
-        df[col] = df[f"{col}_lat"].fillna(df[f"{col}_brz"])
-        df.drop([f"{col}_lat", f"{col}_brz"], axis=1, inplace=True)
+        if f"{col}_brz" in df.columns:
+            df[col] = df[col].fillna(df[f"{col}_brz"])
+            df.drop(f"{col}_brz", axis=1, inplace=True)
 
     return df
 
 # === Streamlit UI ===
 df = build_df()
-
-# --- Фильтр по диапазону дат урока ---
-min_d = df["Date of the lesson"].min().date()
-max_d = df["Date of the lesson"].max().date()
-start_d, end_d = st.sidebar.date_input(
-    "Lesson date range",
-    value=[min_d, max_d],
-    key="lesson_date_range"
-)
-# если выбрано два, применяем
-if isinstance(start_d, (list, tuple)) is False:
-    # streamlit старые версии могут возвращать два отдельных в переменных
-    pass
-# фильтруем
-mask_date = (df["Date of the lesson"] >= pd.to_datetime(start_d)) & (df["Date of the lesson"] <= pd.to_datetime(end_d))
-df = df[mask_date]
-
 st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
@@ -242,7 +219,7 @@ filters = {
         default=[]
     )
     for c in df.columns
-    if (df[c].dtype == object or pt.is_numeric_dtype(df[c])) and c != "Date of the lesson"
+    if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
 
 mask = pd.Series(True, index=df.index)
