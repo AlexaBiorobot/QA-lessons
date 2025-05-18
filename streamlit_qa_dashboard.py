@@ -18,7 +18,7 @@ BRAZIL_GID       = "835553195"
 
 RATING_LATAM_SS  = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING_BRAZIL_SS = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
-RATING_SHEET     = "Rating"  # диапазон по API v4: лист называется "Rating"
+RATING_SHEET     = "Rating"
 
 QA_LATAM_SS      = RATING_LATAM_SS
 QA_BRAZIL_SS     = RATING_BRAZIL_SS
@@ -108,7 +108,6 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID":"Tutor ID"})
 
-    # Добавляем пустые колонки, если их не было в шите
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
@@ -117,10 +116,14 @@ def load_rating(ss_id: str) -> pd.DataFrame:
 
 def load_qa(ss_id: str) -> pd.DataFrame:
     rows = fetch_values(ss_id, QA_SHEET)
-    df = pd.DataFrame(rows[1:], columns=rows[0])
-    df = df[["A","E","C","D"]]
-    df = df.rename(columns={"A":"Tutor ID","E":"Group","C":"QA score","D":"QA marker"})
-    df["Date"] = pd.to_datetime(df["B"], errors="coerce")
+    data = rows[1:]  # без заголовка
+    df = pd.DataFrame({
+        "Tutor ID":  [r[0] if len(r) > 0 else pd.NA for r in data],
+        "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
+        "QA score":  [r[2] if len(r) > 2 else pd.NA for r in data],
+        "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
+        "Date":      pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
+    })
     return df[["Tutor ID","Group","Date","QA score","QA marker"]]
 
 def load_replacements() -> pd.DataFrame:
