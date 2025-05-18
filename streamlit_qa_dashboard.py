@@ -177,15 +177,12 @@ def build_df():
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
 
-    # сначала клеим латам-данные
     df = df.merge(
         q_lat,
         on=["Tutor name","Date of the lesson"],
         how="left",
         suffixes=(None, "_lat")
-    )
-    # потом бразильские
-    df = df.merge(
+    ).merge(
         q_brz,
         on=["Tutor name","Date of the lesson"],
         how="left",
@@ -211,21 +208,32 @@ def build_df():
         df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
         df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
 
-    # --- и для QA полей (защищённо: только если suffix-колонки есть) ---
+    # --- и для QA полей ---
     for col in ["QA score","QA marker"]:
-        lat = f"{col}_lat"
-        brz = f"{col}_brz"
-        if lat in df.columns or brz in df.columns:
-            # заполнить из реальной серии, а не из None
-            left  = df[lat] if lat in df.columns else pd.Series(pd.NA, index=df.index)
-            right = df[brz] if brz in df.columns else pd.Series(pd.NA, index=df.index)
-            df[col] = left.fillna(right)
-            df.drop([c for c in (lat, brz) if c in df.columns], axis=1, inplace=True)
+        df[col] = df[f"{col}_lat"].fillna(df[f"{col}_brz"])
+        df.drop([f"{col}_lat", f"{col}_brz"], axis=1, inplace=True)
 
     return df
 
 # === Streamlit UI ===
 df = build_df()
+
+# --- Фильтр по диапазону дат урока ---
+min_d = df["Date of the lesson"].min().date()
+max_d = df["Date of the lesson"].max().date()
+start_d, end_d = st.sidebar.date_input(
+    "Lesson date range",
+    value=[min_d, max_d],
+    key="lesson_date_range"
+)
+# если выбрано два, применяем
+if isinstance(start_d, (list, tuple)) is False:
+    # streamlit старые версии могут возвращать два отдельных в переменных
+    pass
+# фильтруем
+mask_date = (df["Date of the lesson"] >= pd.to_datetime(start_d)) & (df["Date of the lesson"] <= pd.to_datetime(end_d))
+df = df[mask_date]
+
 st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
@@ -234,7 +242,7 @@ filters = {
         default=[]
     )
     for c in df.columns
-    if df[c].dtype == object or pt.is_numeric_dtype(df[c])
+    if (df[c].dtype == object or pt.is_numeric_dtype(df[c])) and c != "Date of the lesson"
 }
 
 mask = pd.Series(True, index=df.index)
