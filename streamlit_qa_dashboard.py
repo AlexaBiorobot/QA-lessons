@@ -130,24 +130,24 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    qa_cols = ["Tutor ID","Date of the lesson","QA score","QA marker"]
+    # ловим ошибки и отсутствие строк
+    qa_cols = ["Tutor name","Date of the lesson","QA score","QA marker"]
     try:
         rows = fetch_values(ss_id, QA_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=qa_cols)
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=qa_cols)
+
     data = rows[1:]
     df = pd.DataFrame({
-        "Tutor ID":            [r[0] if len(r) > 0 else pd.NA for r in data],
+        "Tutor name":          [r[0] if len(r) > 0 else pd.NA for r in data],
+        "Date of the lesson":  pd.to_datetime([r[1] if len(r) > 1 else None for r in data],
+                                               errors="coerce", dayfirst=True),
         "QA score":            [r[2] if len(r) > 2 else pd.NA for r in data],
         "QA marker":           [r[3] if len(r) > 3 else pd.NA for r in data],
-        "Date of the lesson":  pd.to_datetime(
-                                   [r[1] if len(r) > 1 else None for r in data],
-                                   errors="coerce"
-                               ),
     })
-    return df[qa_cols]
+    return df
 
 def load_replacements() -> pd.DataFrame:
     rows = fetch_values(REPL_SS, REPL_SHEET)
@@ -178,11 +178,26 @@ def build_df():
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
-    df = (
-        df
-        .merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left", suffixes=("_x","_y"))
-        .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
+    
+    # сначала клеим латам-данные
+    df = df.merge(
+        q_lat,
+        on=["Tutor name","Date of the lesson"],
+        how="left",
+        suffixes=(None, "_lat")
     )
+    # потом бразильские
+    df = df.merge(
+        q_brz,
+        on=["Tutor name","Date of the lesson"],
+        how="left",
+        suffixes=(None, "_brz")
+    )
+    
+    # теперь нужно склейть колонки QA score и QA marker из латам и бразил
+    for col in ["QA score","QA marker"]:
+        df[col] = df[f"{col}_lat"].fillna(df[f"{col}_brz"])
+        df.drop([f"{col}_lat", f"{col}_brz"], axis=1, inplace=True)
 
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
