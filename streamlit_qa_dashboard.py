@@ -76,7 +76,6 @@ def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
 # === Ваши загрузчики ===
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     raw = fetch_csv(ss_id, gid)
-    # теперь реальные имена колонок из CSV
     wanted = [
         "teacher_name",
         "teacher_id",
@@ -160,20 +159,20 @@ def build_df():
     r_lat  = load_rating(RATING_LATAM_SS)
     r_brz  = load_rating(RATING_BRAZIL_SS)
     df = (df
-          .merge(r_lat, on="Tutor ID", how="left").where(df["Region"]=="LATAM", df)
-          .merge(r_brz, on="Tutor ID", how="left").where(df["Region"]=="Brazil", df))
+          .merge(r_lat, on="Tutor ID", how="left")
+          .merge(r_brz, on="Tutor ID", how="left", suffixes=("_x","_y")))
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
     df = (df
-          .merge(q_lat, on=["Tutor ID","Group","Date of the lesson"], how="left").where(df["Region"]=="LATAM", df)
-          .merge(q_brz, on=["Tutor ID","Group","Date of the lesson"], how="left").where(df["Region"]=="Brazil", df))
+          .merge(q_lat, on=["Tutor ID","Group","Date of the lesson"], how="left", suffixes=("_x","_y"))
+          .merge(q_brz, on=["Tutor ID","Group","Date of the lesson"], how="left"))
 
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
-    # Объединяем LATAM (_x) и Brazil (_y) колонки рейтинга в одну
+    # --- здесь объединяем рейтинговые колонки _x и _y в одни ---
     rating_cols = [
         "Rating",
         "Num of QA scores",
@@ -187,9 +186,8 @@ def build_df():
         df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
         df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
 
-    # Объединяем QA колонки
-    qa_cols = ["QA score", "QA marker"]
-    for col in qa_cols:
+    # --- и для QA полей ---
+    for col in ["QA score","QA marker"]:
         df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
         df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
 
