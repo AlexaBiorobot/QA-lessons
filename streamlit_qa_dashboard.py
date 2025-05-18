@@ -135,7 +135,9 @@ def load_qa(ss_id: str) -> pd.DataFrame:
         "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
         "Date":      pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
     })
-    return df[["Tutor ID","Group","Date","QA score","QA marker"]]
+    # Переименовываем колонку, чтобы совпадала с build_df
+    df = df.rename(columns={"Date": "Date of the lesson"})
+    return df[["Tutor ID","Group","Date of the lesson","QA score","QA marker"]]
 
 def load_replacements() -> pd.DataFrame:
     rows = fetch_values(REPL_SS, REPL_SHEET)
