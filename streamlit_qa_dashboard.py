@@ -154,9 +154,14 @@ def load_replacements() -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
 
     data = rows[1:]
+    # попытаемся найти столбцы по именам, иначе по умолчанию 3 и 5
+    header = rows[0]
+    date_idx = header.index("Date") if "Date" in header else 3
+    group_idx = header.index("Group") if "Group" in header else 5
+
     df = pd.DataFrame({
-        "Date":  pd.to_datetime([r[3] if len(r) > 3 else None for r in data], errors="coerce"),
-        "Group": [r[5] if len(r) > 5 else pd.NA for r in data],
+        "Date":  pd.to_datetime([r[date_idx] if len(r) > date_idx else None for r in data], errors="coerce"),
+        "Group": [r[group_idx] if len(r) > group_idx else pd.NA for r in data],
     })
     df["Replacement or not"] = "Replacement/Postponement"
     return df
@@ -189,7 +194,10 @@ def build_df():
 df = build_df()
 st.sidebar.header("Filters")
 filters = {
-    c: st.sidebar.multiselect(c, sorted(df[c].dropna().unique()), default=sorted(df[c].dropna().unique()))
+    c: st.sidebar.multiselect(c,
+        sorted(df[c].dropna().unique()),
+        default=sorted(df[c].dropna().unique())
+    )
     for c in df.columns if df[c].dtype == object
 }
 
