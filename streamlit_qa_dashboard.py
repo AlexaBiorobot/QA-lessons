@@ -62,8 +62,8 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers, timeout=20)
+    # Убираем headers=get_auth_header()
+    resp = api_retry(requests.get, url, timeout=20)
     resp.raise_for_status()
     try:
         return pd.read_csv(io.StringIO(resp.text), dtype=str)
@@ -111,7 +111,6 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=want)
     if not rows or len(rows)<2:
         return pd.DataFrame(columns=want)
-    # определяем, где заголовок
     if "Tutor ID" in rows[0]:
         header, data = rows[0], rows[1:]
     else:
@@ -136,11 +135,10 @@ def load_qa(ss_id: str) -> pd.DataFrame:
     if not rows or len(rows)<2:
         return pd.DataFrame(columns=want)
     data = rows[1:]
-    # Tutor ID в колонке G (индекс 6)
     df = pd.DataFrame({
         "Tutor ID":           [r[6]  if len(r)>6 else pd.NA for r in data],
         "Date of the lesson": pd.to_datetime([r[1] if len(r)>1 else None for r in data],
-                                             errors="coerce", dayfirst=True),
+                                              errors="coerce", dayfirst=True),
         "QA score":           [r[2]  if len(r)>2 else pd.NA for r in data],
         "QA marker":          [r[3]  if len(r)>3 else pd.NA for r in data],
     })
@@ -152,14 +150,13 @@ def load_replacements() -> pd.DataFrame:
         return pd.DataFrame(columns=["Date","Group","Replacement or not"])
     data = rows[1:]
     df   = pd.DataFrame({
-        "Date":      pd.to_datetime([r[3] if len(r)>3 else None for r in data],
-                                      errors="coerce"),
+        "Date":      pd.to_datetime([r[3] if len(r)>3 else None for r in data], errors="coerce"),
         "Group":     [r[5]  if len(r)>5 else pd.NA for r in data],
         "Replacement or not": "Replacement/Postponement"
     })
     return df
 
-# === Собираем всё в один DF ===
+# === Собираем всё в один DF
 @st.cache_data(show_spinner=True)
 def build_df():
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
@@ -172,7 +169,7 @@ def build_df():
     df = df.merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz")) \
            .merge(r_brz, on="Tutor ID", how="left")
 
-    # QA: сначала LATAM, отдельно пометим столбцы
+    # QA: сначала LATAM, переименуем поля
     q_lat = load_qa(QA_LATAM_SS).rename(
         columns={"QA score":"QA score_lat","QA marker":"QA marker_lat"}
     )
