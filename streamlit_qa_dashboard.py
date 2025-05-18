@@ -216,7 +216,10 @@ def build_df():
         lat = f"{col}_lat"
         brz = f"{col}_brz"
         if lat in df.columns or brz in df.columns:
-            df[col] = df.get(lat).fillna(df.get(brz))
+            # заполнить из реальной серии, а не из None
+            left  = df[lat] if lat in df.columns else pd.Series(pd.NA, index=df.index)
+            right = df[brz] if brz in df.columns else pd.Series(pd.NA, index=df.index)
+            df[col] = left.fillna(right)
             df.drop([c for c in (lat, brz) if c in df.columns], axis=1, inplace=True)
 
     return df
