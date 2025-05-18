@@ -216,7 +216,9 @@ filters = {
         sorted(df[c].dropna().unique()),
         default=[]
     )
-    for c in df.columns if df[c].dtype == object
+    # теперь захватываем и object, и числовые колонки
+    for c in df.columns
+    if df[c].dtype == object or pd.api.types.is_numeric_dtype(df[c])
 }
 
 mask = pd.Series(True, index=df.index)
