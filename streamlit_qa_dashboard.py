@@ -65,7 +65,11 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     headers = get_auth_header()
     resp = api_retry(requests.get, url, headers=headers, timeout=20)
     resp.raise_for_status()
-    return pd.read_csv(io.StringIO(resp.text), dtype=str)
+    try:
+        return pd.read_csv(io.StringIO(resp.text), dtype=str)
+    except pd.errors.EmptyDataError:
+        # если CSV пустой, возвращаем пустой DataFrame
+        return pd.DataFrame()
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
