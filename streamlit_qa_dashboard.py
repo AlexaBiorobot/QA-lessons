@@ -97,14 +97,22 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     header = header + [""]*(maxc-len(header))
     data   = [r+[""]*(maxc-len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
+
     cols = [
         "Tutor ID","Rating","Num of QA scores",
         "Num of QA scores (last 90 days)","Average QA score",
         "Average QA score (last 2 scores within last 90 days)",
         "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
     ]
+
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID":"Tutor ID"})
+
+    # Добавляем пустые колонки, если их не было в шите
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
