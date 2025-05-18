@@ -3,17 +3,15 @@ import os
 import io
 import time
 
-import streamlit as st
-import pandas as pd
-import requests
 from google.auth.transport.requests import AuthorizedSession
 AuthorizedSession._auth_request = AuthorizedSession.request
-from google.oauth2.service_account import Credentials
 
-# === Streamlit config ===
-import gspread  # нужно лишь для проверки версии
-print("gspread version (ignored):", gspread.__version__)
+import streamlit as st
 st.set_page_config(layout="wide")
+
+import pandas as pd
+import requests
+from google.oauth2.service_account import Credentials
 
 # === Константы ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
