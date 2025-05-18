@@ -102,7 +102,7 @@ def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
 # === Ваши загрузчики ===
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     raw = fetch_csv(ss_id, gid)
-    wanted = ["R","Q","B","J","N","G","H","Y"]
+    wanted = ["teacher_name","teacher_id","lesson_date","group_title","course_id","lesson_module","lesson_number","watch_url"]
     for c in wanted:
         if c not in raw.columns:
             raw[c] = pd.NA
