@@ -69,23 +69,24 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{sheet_name}"
     headers = get_auth_header()
-    try:
-        # ставим таймаут 20 секунд и ловим все сетевые исключения
-        resp = api_retry(requests.get, url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        return resp.json().get("values", [])
-    except requests.RequestException as e:
-        st.warning(f"Не удалось загрузить лист `{sheet_name}`: {e}")
-        return []
+    resp = api_retry(requests.get, url, headers=headers, timeout=20)
+    resp.raise_for_status()
+    return resp.json().get("values", [])
 
 # === Ваши загрузчики ===
 def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     raw = fetch_csv(ss_id, gid)
-    wanted = ["R","Q","B","J","N","G","H","Y"]
-    for c in wanted:
-        if c not in raw.columns:
-            raw[c] = pd.NA
-    df = raw[wanted]
+    # теперь выбираем нужные столбцы по их буквенным позициям в таблице (R,Q,B,J,N,G,H,Y)
+    letters = ["R","Q","B","J","N","G","H","Y"]
+    # переводим букву в 0‐based индекс: A->0, B->1, ...
+    idxs = [ord(letter) - ord("A") for letter in letters]
+    # если в raw меньше колонок, чем нужно, добиваем пустыми
+    max_idx = max(idxs)
+    if raw.shape[1] <= max_idx:
+        for i in range(raw.shape[1], max_idx + 1):
+            raw[f"__pad_{i}"] = pd.NA
+    # берём нужные колонки по позиции
+    df = raw.iloc[:, idxs]
     df.columns = [
         "Tutor name","Tutor ID","Date of the lesson","Group",
         "Course ID","Module","Lesson","Lesson Link"
