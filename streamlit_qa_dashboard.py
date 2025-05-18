@@ -180,6 +180,9 @@ def build_df():
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
+    # Убираем лишнюю колонку Date (она дублирует Date of the lesson)
+    df.drop(columns=["Date"], inplace=True)
+
     # --- объединяем рейтинговые колонки ---
     rating_cols = [
         "Rating w retention",
