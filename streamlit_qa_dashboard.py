@@ -62,8 +62,8 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers, timeout=20)
+    # Без заголовка авторизации, чтобы Google отдавал реальный CSV
+    resp = api_retry(requests.get, url, timeout=20)
     resp.raise_for_status()
     try:
         return pd.read_csv(io.StringIO(resp.text), dtype=str)
