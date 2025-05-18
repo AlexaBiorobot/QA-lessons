@@ -11,8 +11,11 @@ from gspread.exceptions import APIError
 from google.auth.exceptions import GoogleAuthError
 from google.oauth2.service_account import Credentials
 
-# --- Показываем версию gspread в UI для отладки ---
-st.write(f"gspread version: {gspread.__version__}")
+# --- Сразу настраиваем страницу ---
+st.set_page_config(layout="wide")
+
+# --- Для отладки версии gspread в логах ---
+print("gspread version:", gspread.__version__)
 
 # === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
