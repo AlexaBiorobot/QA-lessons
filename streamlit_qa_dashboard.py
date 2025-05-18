@@ -98,12 +98,11 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=want)
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=want)
-    # header detection
     if "Tutor ID" in rows[0]:
         header, data = rows[0], rows[1:]
     else:
         header, data = rows[1], rows[2:]
-    maxc   = max(len(header), *(len(r) for r in data))
+    maxc = max(len(header), *(len(r) for r in data))
     header = header + [""]*(maxc-len(header))
     data   = [r+[""]*(maxc-len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
@@ -154,11 +153,8 @@ def build_df():
     # — Rating
     r_lat = load_rating(RATING_LATAM_SS)
     r_brz = load_rating(RATING_BRAZIL_SS)
-    df = (
-        df
-        .merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz"))
-        .merge(r_brz, on="Tutor ID", how="left")
-    )
+    df = df.merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz")) \
+           .merge(r_brz, on="Tutor ID", how="left")
     # склеиваем рейтинги обратно
     rating_cols = ["Rating","Num of QA scores",
                    "Num of QA scores (last 90 days)","Average QA score",
@@ -166,16 +162,14 @@ def build_df():
                    "Average QA marker","Average QA marker (last 2 markers within last 90 days)"]
     for c in rating_cols:
         df[c] = df[f"{c}_lat"].fillna(df[f"{c}_brz"])
-    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols], axis=1, inplace=True)
+    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols],
+            axis=1, inplace=True)
 
-    # — QA
+    # — QA (объединяем LATAM и Brazil)
     q_lat = load_qa(QA_LATAM_SS).rename(columns={"QA score":"QA score_lat","QA marker":"QA marker_lat"})
     q_brz = load_qa(QA_BRAZIL_SS).rename(columns={"QA score":"QA score_brz","QA marker":"QA marker_brz"})
-    df = (
-        df
-        .merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left")
-        .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
-    )
+    df = df.merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left") \
+           .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
     for base in ["QA score","QA marker"]:
         df[base] = df[f"{base}_lat"].fillna(df[f"{base}_brz"])
     df.drop(["QA score_lat","QA score_brz","QA marker_lat","QA marker_brz"], axis=1, inplace=True)
@@ -183,16 +177,15 @@ def build_df():
     # — Replacements
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
-    df["Replacement or not"] = df["Replacement or not"].fillna("")
+    df["Replacement or not"].fillna("", inplace=True)
     df.drop(columns=["Date"], inplace=True)
 
     return df
 
-
 # === Streamlit UI ===
 df = build_df()
 
-# 1) Фильтр по дате урока
+# 1) Фильтр по диапазону дат урока
 st.sidebar.header("Lesson date")
 min_date = df["Date of the lesson"].min()
 max_date = df["Date of the lesson"].max()
@@ -227,5 +220,4 @@ dff = df[mask]
 
 st.title("📊 QA & Rating Dashboard")
 st.dataframe(dff, use_container_width=True)
-csv = dff.to_csv(index=False)
-st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
+st.download_button("📥 Download CSV", dff.to_csv(index=False), "qa_dashboard.csv", "text/csv")
