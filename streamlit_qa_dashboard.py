@@ -179,7 +179,6 @@ def build_df() -> pd.DataFrame:
 
 
 # === Streamlit UI ===
-st.set_page_config(layout="wide")
 df = build_df()
 
 st.sidebar.header("Filters")
