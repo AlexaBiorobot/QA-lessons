@@ -182,7 +182,7 @@ def build_df():
 
     # --- объединяем рейтинговые колонки ---
     rating_cols = [
-        "Rating",
+        "Rating w retention",
         "Num of QA scores",
         "Num of QA scores (last 90 days)",
         "Average QA score",
