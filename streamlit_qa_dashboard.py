@@ -172,6 +172,27 @@ def build_df():
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
+
+    # Объединяем LATAM (_x) и Brazil (_y) колонки рейтинга в одну
+    rating_cols = [
+        "Rating",
+        "Num of QA scores",
+        "Num of QA scores (last 90 days)",
+        "Average QA score",
+        "Average QA score (last 2 scores within last 90 days)",
+        "Average QA marker",
+        "Average QA marker (last 2 markers within last 90 days)"
+    ]
+    for col in rating_cols:
+        df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
+        df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
+
+    # Объединяем QA колонки
+    qa_cols = ["QA score", "QA marker"]
+    for col in qa_cols:
+        df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
+        df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
+
     return df
 
 # === Streamlit UI ===
@@ -181,14 +202,14 @@ filters = {
     c: st.sidebar.multiselect(
         c,
         sorted(df[c].dropna().unique()),
-        default=[]             # пустой список по-умолчанию
+        default=[]
     )
     for c in df.columns if df[c].dtype == object
 }
 
 mask = pd.Series(True, index=df.index)
 for c, sel in filters.items():
-    if sel:                    # фильтруем только если что-то выбрано
+    if sel:
         mask &= df[c].isin(sel)
 dff = df[mask]
 
