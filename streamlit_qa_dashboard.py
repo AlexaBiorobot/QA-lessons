@@ -203,6 +203,16 @@ def build_df():
                   right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
     df.drop(columns=["Date"], inplace=True)
+    
+    # === НОВЫЙ БЛОК: докидываем все записи из Lesson evaluation ===
+    qa_all = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
+    # создаем каркас с пустыми колонками, как в df
+    empty = pd.DataFrame(columns=df.columns)
+    # заполняем только наши четыре поля
+    empty.loc[:, ["Tutor ID","Date of the lesson","QA score","QA marker"]] = qa_all[["Tutor ID","Date of the lesson","QA score","QA marker"]]
+    # объединяем и убираем возможные дубликаты
+    df = pd.concat([df, empty], ignore_index=True)
+    df = df.drop_duplicates(subset=["Tutor ID","Date of the lesson","QA score","QA marker"], keep="first")
 
     return df
 
