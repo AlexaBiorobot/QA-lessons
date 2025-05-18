@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import requests
 from google.auth.transport.requests import AuthorizedSession
+AuthorizedSession._auth_request = AuthorizedSession.request
 from google.oauth2.service_account import Credentials
 
 # === Streamlit config ===
