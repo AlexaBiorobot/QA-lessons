@@ -97,13 +97,11 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
     ]
 
-    # Если запрос упал — возвращаем пустой DataFrame с нужными колонками
     try:
         rows = fetch_values(ss_id, RATING_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=cols)
 
-    # Если даже заголовков нет — тоже возвращаем пустой
     if len(rows) < 2:
         return pd.DataFrame(columns=cols)
 
@@ -114,11 +112,9 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     data   = [r + [""] * (maxc - len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
 
-    # Переименование столбца ID, если нужно
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID": "Tutor ID"})
 
-    # Добавляем недостающие колонки как пустые
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
@@ -127,7 +123,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
 
 def load_qa(ss_id: str) -> pd.DataFrame:
     rows = fetch_values(ss_id, QA_SHEET)
-    data = rows[1:]  # без заголовка
+    data = rows[1:]
     df = pd.DataFrame({
         "Tutor ID":  [r[0] if len(r) > 0 else pd.NA for r in data],
         "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
@@ -135,33 +131,20 @@ def load_qa(ss_id: str) -> pd.DataFrame:
         "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
         "Date":      pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
     })
-    # Переименовываем колонку, чтобы совпадала с build_df
     df = df.rename(columns={"Date": "Date of the lesson"})
     return df[["Tutor ID","Group","Date of the lesson","QA score","QA marker"]]
 
 def load_replacements() -> pd.DataFrame:
-    cols = ["Date", "Group", "Replacement or not"]
-    # Если запрос выдал ошибку — возвращаем пустой DF с нужными колонками
-    try:
-        rows = fetch_values(REPL_SS, REPL_SHEET)
-    except requests.HTTPError:
-        return pd.DataFrame(columns=cols)
-
-    # Если данных нет или только заголовок — тоже пустой DF
+    rows = fetch_values(REPL_SS, REPL_SHEET)
     if len(rows) < 2:
-        return pd.DataFrame(columns=cols)
-
-    header = rows[0]
+        return pd.DataFrame(columns=["Date","Group","Replacement or not"])
     data = rows[1:]
-    # Выравниваем длины строк под заголовок
-    maxc = max(len(header), *(len(r) for r in data))
-    header += [""] * (maxc - len(header))
-    data = [r + [""] * (maxc - len(r)) for r in data]
-
-    df = pd.DataFrame(data, columns=header)
-    df["Date"]  = pd.to_datetime(df.get("D", []), errors="coerce")
-    df["Group"] = df.get("F", [])
-    return df[["Date","Group"]].assign(**{"Replacement or not":"Replacement/Postponement"})
+    df = pd.DataFrame({
+        "Date": pd.to_datetime([r[3] if len(r) > 3 else None for r in data], errors="coerce"),
+        "Group": [r[5] if len(r) > 5 else pd.NA for r in data],
+    })
+    df["Replacement or not"] = "Replacement/Postponement"
+    return df
 
 # === Собираем всё в один DataFrame ===
 @st.cache_data(show_spinner=True)
