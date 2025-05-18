@@ -8,9 +8,6 @@ print("gspread version:", gspread.__version__)
 from gspread.exceptions import APIError
 from google.auth.exceptions import GoogleAuthError
 
-from google.auth.transport.requests import AuthorizedSession
-AuthorizedSession._auth_request = AuthorizedSession.request
-
 # === Constants ===
 LESSONS_SS       = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 LATAM_GID        = "0"
