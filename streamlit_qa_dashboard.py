@@ -109,19 +109,34 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         rows = fetch_values(ss_id, RATING_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=cols)
-    if len(rows) < 2:
+    # если нет строк или только одна — возвращаем пустой
+    if not rows or len(rows) == 1:
         return pd.DataFrame(columns=cols)
-    header = rows[1]
-    data   = rows[2:]
-    maxc   = max(len(header), *(len(r) for r in data))
+
+    # определяем, где заголовки: если в первой строке есть "Tutor ID" — используем её,
+    # иначе берём вторую и сдвигаем данные соответственно
+    if "Tutor ID" in rows[0]:
+        header = rows[0]
+        data   = rows[1:]
+    else:
+        header = rows[1]
+        data   = rows[2:] if len(rows) > 2 else []
+
+    # выравниваем длины строк под header
+    maxc   = max(len(header), *(len(r) for r in data)) if data else len(header)
     header = header + [""] * (maxc - len(header))
     data   = [r + [""] * (maxc - len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
+
+    # если раньше столбец назывался "ID" — переименуем
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID": "Tutor ID"})
+
+    # добавляем недостающие колонки
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
+
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
@@ -159,8 +174,8 @@ def build_df():
     r_lat  = load_rating(RATING_LATAM_SS)
     r_brz  = load_rating(RATING_BRAZIL_SS)
     df = (df
-          .merge(r_lat, on="Tutor ID", how="left")
-          .merge(r_brz, on="Tutor ID", how="left", suffixes=("_x","_y")))
+          .merge(r_lat, on="Tutor ID", how="left", suffixes=("_x","_y"))
+          .merge(r_brz, on="Tutor ID", how="left"))
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
@@ -172,7 +187,7 @@ def build_df():
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
 
-    # --- здесь объединяем рейтинговые колонки _x и _y в одни ---
+    # --- объединяем рейтинговые колонки _x и _y ---
     rating_cols = [
         "Rating",
         "Num of QA scores",
