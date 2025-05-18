@@ -213,11 +213,11 @@ def build_df():
 df = build_df()
 
 # --- Фильтр по диапазону дат урока ---
-st.sidebar.header("Дата урока")
+st.sidebar.header("Lesson date")
 min_date = df["Date of the lesson"].min()
 max_date = df["Date of the lesson"].max()
 start_date, end_date = st.sidebar.date_input(
-    "Выберите диапазон дат",
+    "Choose lesson dates",
     value=[min_date, max_date],
     min_value=min_date,
     max_value=max_date
@@ -226,7 +226,7 @@ mask = (df["Date of the lesson"] >= pd.to_datetime(start_date)) & \
        (df["Date of the lesson"] <= pd.to_datetime(end_date))
 
 # --- Остальные фильтры ---
-st.sidebar.header("Фильтры")
+st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
         c,
