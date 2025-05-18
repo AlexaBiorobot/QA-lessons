@@ -90,14 +90,6 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
     return df
 
 def load_rating(ss_id: str) -> pd.DataFrame:
-    rows = fetch_values(ss_id, RATING_SHEET)
-    header = rows[1]
-    data   = rows[2:]
-    maxc   = max(len(header), *(len(r) for r in data))
-    header = header + [""]*(maxc-len(header))
-    data   = [r+[""]*(maxc-len(r)) for r in data]
-    df     = pd.DataFrame(data, columns=header)
-
     cols = [
         "Tutor ID","Rating","Num of QA scores",
         "Num of QA scores (last 90 days)","Average QA score",
@@ -105,9 +97,28 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
     ]
 
-    if "ID" in df.columns and "Tutor ID" not in df.columns:
-        df = df.rename(columns={"ID":"Tutor ID"})
+    # Если запрос упал — возвращаем пустой DataFrame с нужными колонками
+    try:
+        rows = fetch_values(ss_id, RATING_SHEET)
+    except requests.HTTPError:
+        return pd.DataFrame(columns=cols)
 
+    # Если даже заголовков нет — тоже возвращаем пустой
+    if len(rows) < 2:
+        return pd.DataFrame(columns=cols)
+
+    header = rows[1]
+    data   = rows[2:]
+    maxc   = max(len(header), *(len(r) for r in data))
+    header = header + [""] * (maxc - len(header))
+    data   = [r + [""] * (maxc - len(r)) for r in data]
+    df     = pd.DataFrame(data, columns=header)
+
+    # Переименование столбца ID, если нужно
+    if "ID" in df.columns and "Tutor ID" not in df.columns:
+        df = df.rename(columns={"ID": "Tutor ID"})
+
+    # Добавляем недостающие колонки как пустые
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
