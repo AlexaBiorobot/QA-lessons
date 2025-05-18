@@ -140,10 +140,27 @@ def load_qa(ss_id: str) -> pd.DataFrame:
     return df[["Tutor ID","Group","Date of the lesson","QA score","QA marker"]]
 
 def load_replacements() -> pd.DataFrame:
-    rows = fetch_values(REPL_SS, REPL_SHEET)
-    df   = pd.DataFrame(rows[1:], columns=rows[0])
-    df["Date"]  = pd.to_datetime(df["D"], errors="coerce")
-    df["Group"] = df["F"]
+    cols = ["Date", "Group", "Replacement or not"]
+    # Если запрос выдал ошибку — возвращаем пустой DF с нужными колонками
+    try:
+        rows = fetch_values(REPL_SS, REPL_SHEET)
+    except requests.HTTPError:
+        return pd.DataFrame(columns=cols)
+
+    # Если данных нет или только заголовок — тоже пустой DF
+    if len(rows) < 2:
+        return pd.DataFrame(columns=cols)
+
+    header = rows[0]
+    data = rows[1:]
+    # Выравниваем длины строк под заголовок
+    maxc = max(len(header), *(len(r) for r in data))
+    header += [""] * (maxc - len(header))
+    data = [r + [""] * (maxc - len(r)) for r in data]
+
+    df = pd.DataFrame(data, columns=header)
+    df["Date"]  = pd.to_datetime(df.get("D", []), errors="coerce")
+    df["Group"] = df.get("F", [])
     return df[["Date","Group"]].assign(**{"Replacement or not":"Replacement/Postponement"})
 
 # === Собираем всё в один DataFrame ===
