@@ -130,7 +130,6 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    # ловим ошибки и отсутствие строк
     qa_cols = ["Tutor name","Date of the lesson","QA score","QA marker"]
     try:
         rows = fetch_values(ss_id, QA_SHEET)
@@ -138,7 +137,6 @@ def load_qa(ss_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=qa_cols)
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=qa_cols)
-
     data = rows[1:]
     df = pd.DataFrame({
         "Tutor name":          [r[0] if len(r) > 0 else pd.NA for r in data],
@@ -178,7 +176,7 @@ def build_df():
 
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
-    
+
     # сначала клеим латам-данные
     df = df.merge(
         q_lat,
@@ -193,11 +191,6 @@ def build_df():
         how="left",
         suffixes=(None, "_brz")
     )
-    
-    # теперь нужно склейть колонки QA score и QA marker из латам и бразил
-    for col in ["QA score","QA marker"]:
-        df[col] = df[f"{col}_lat"].fillna(df[f"{col}_brz"])
-        df.drop([f"{col}_lat", f"{col}_brz"], axis=1, inplace=True)
 
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
@@ -222,11 +215,9 @@ def build_df():
     for col in ["QA score","QA marker"]:
         lat = f"{col}_lat"
         brz = f"{col}_brz"
-        # клеим только если хотя бы одна из колонок с суффиксом есть
         if lat in df.columns or brz in df.columns:
             df[col] = df.get(lat).fillna(df.get(brz))
-            # удаляем только те из суффикс-колонок, которые реально появились
-            df.drop([c for c in (lat, brz) if c in df.columns], axis=1, inplace=True))
+            df.drop([c for c in (lat, brz) if c in df.columns], axis=1, inplace=True)
 
     return df
 
