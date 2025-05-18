@@ -1,6 +1,4 @@
-gspread>=6.0.0
-pandas
-gspread-dataframe
-requests
 streamlit
+pandas
+requests
 google-auth>=2.0.0
