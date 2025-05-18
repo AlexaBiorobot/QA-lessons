@@ -69,8 +69,8 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
-    # оборачиваем sheet_name в одинарные кавычки и URL-энкодим
-    quoted = quote(f"'{sheet_name}'", safe='')
+    # оборачиваем sheet_name в одинарные кавычки и URL-энкодим (пробелы → %20, но ' остаются)
+    quoted = quote(f"'{sheet_name}'", safe="'")
     url    = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{quoted}"
     headers = get_auth_header()
     resp    = api_retry(requests.get, url, headers=headers)
