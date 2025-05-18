@@ -62,13 +62,12 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    # Без заголовка авторизации, чтобы Google отдавал реальный CSV
-    resp = api_retry(requests.get, url, timeout=20)
+    headers = get_auth_header()
+    resp = api_retry(requests.get, url, headers=headers, timeout=20)
     resp.raise_for_status()
     try:
         return pd.read_csv(io.StringIO(resp.text), dtype=str)
     except pd.errors.EmptyDataError:
-        # если CSV пустой, возвращаем пустой DataFrame
         return pd.DataFrame()
 
 # === Google Sheets API v4 для приватных range ===
@@ -116,8 +115,9 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         rows = fetch_values(ss_id, RATING_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=cols)
-    if not rows or len(rows) == 1:
+    if not rows or len(rows) < 2:
         return pd.DataFrame(columns=cols)
+    # определяем, где шапка
     if "Tutor ID" in rows[0]:
         header, data = rows[0], rows[1:]
     else:
@@ -134,7 +134,7 @@ def load_rating(ss_id: str) -> pd.DataFrame:
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
-    qa_cols = ["Tutor name","Date of the lesson","QA score","QA marker"]
+    qa_cols = ["Tutor ID","Date of the lesson","QA score","QA marker"]
     try:
         rows = fetch_values(ss_id, QA_SHEET)
     except requests.HTTPError:
@@ -142,8 +142,9 @@ def load_qa(ss_id: str) -> pd.DataFrame:
     if not rows or len(rows) < 2:
         return pd.DataFrame(columns=qa_cols)
     data = rows[1:]
+    # ID в колонке G → индекс 6
     df = pd.DataFrame({
-        "Tutor name":          [r[0] if len(r) > 0 else pd.NA for r in data],
+        "Tutor ID":            [r[6] if len(r) > 6 else pd.NA for r in data],
         "Date of the lesson":  pd.to_datetime([r[1] if len(r) > 1 else None for r in data],
                                                errors="coerce", dayfirst=True),
         "QA score":            [r[2] if len(r) > 2 else pd.NA for r in data],
@@ -170,66 +171,39 @@ def build_df():
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
+    # рейтинг
     r_lat  = load_rating(RATING_LATAM_SS)
     r_brz  = load_rating(RATING_BRAZIL_SS)
     df = (
         df
-        .merge(r_lat, on="Tutor ID", how="left", suffixes=("_x","_y"))
+        .merge(r_lat, on="Tutor ID", how="left", suffixes=("_lat","_brz"))
         .merge(r_brz, on="Tutor ID", how="left")
     )
 
+    # QA теперь по Tutor ID + дате
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
     df = (
         df
-        .merge(q_lat, on=["Tutor name","Date of the lesson"], how="left")
-        .merge(q_brz, on=["Tutor name","Date of the lesson"], how="left", suffixes=(None,"_brz"))
+        .merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left", suffixes=("_lat","_brz"))
+        .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
     )
+    # объединяем поля QA
+    for col in ["QA score","QA marker"]:
+        df[col] = df[f"{col}_lat"].fillna(df[f"{col}_brz"])
+        df.drop([f"{col}_lat", f"{col}_brz"], axis=1, inplace=True)
 
+    # замены
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
     df.drop(columns=["Date"], inplace=True)
-
-    # --- объединяем рейтинговые колонки ---
-    rating_cols = [
-        "Rating w retention",
-        "Num of QA scores",
-        "Num of QA scores (last 90 days)",
-        "Average QA score",
-        "Average QA score (last 2 scores within last 90 days)",
-        "Average QA marker",
-        "Average QA marker (last 2 markers within last 90 days)"
-    ]
-    for col in rating_cols:
-        df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
-        df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
-
-    # --- объединяем QA-поля ---
-    for col in ["QA score","QA marker"]:
-        if f"{col}_brz" in df.columns:
-            df[col] = df[col].fillna(df[f"{col}_brz"])
-            df.drop(f"{col}_brz", axis=1, inplace=True)
 
     return df
 
 # === Streamlit UI ===
 df = build_df()
 
-# --- Фильтр по диапазону дат урока ---
-st.sidebar.header("Lesson date")
-min_date = df["Date of the lesson"].min()
-max_date = df["Date of the lesson"].max()
-start_date, end_date = st.sidebar.date_input(
-    "Choose lesson dates",
-    value=[min_date, max_date],
-    min_value=min_date,
-    max_value=max_date
-)
-mask = (df["Date of the lesson"] >= pd.to_datetime(start_date)) & \
-       (df["Date of the lesson"] <= pd.to_datetime(end_date))
-
-# --- Остальные фильтры ---
 st.sidebar.header("Filters")
 filters = {
     c: st.sidebar.multiselect(
@@ -241,10 +215,10 @@ filters = {
     if df[c].dtype == object or pt.is_numeric_dtype(df[c])
 }
 
+mask = pd.Series(True, index=df.index)
 for c, sel in filters.items():
     if sel:
         mask &= df[c].isin(sel)
-
 dff = df[mask]
 
 st.title("📊 QA & Rating Dashboard")
