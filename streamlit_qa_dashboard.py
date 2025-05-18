@@ -61,8 +61,8 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers, timeout=20)
+    # public sheet: no auth header
+    resp = api_retry(requests.get, url, timeout=20)
     resp.raise_for_status()
     return pd.read_csv(io.StringIO(resp.text), dtype=str)
 
@@ -70,7 +70,7 @@ def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{sheet_name}"
     headers = get_auth_header()
-    resp = api_retry(requests.get, url, headers=headers)
+    resp = api_retry(requests.get, url, headers=headers, timeout=20)
     resp.raise_for_status()
     return resp.json().get("values", [])
 
@@ -139,7 +139,10 @@ def load_qa(ss_id: str) -> pd.DataFrame:
         "Group":     [r[4] if len(r) > 4 else pd.NA for r in data],
         "QA score":  [r[2] if len(r) > 2 else pd.NA for r in data],
         "QA marker": [r[3] if len(r) > 3 else pd.NA for r in data],
-        "Date of the lesson": pd.to_datetime([r[1] if len(r) > 1 else None for r in data], errors="coerce"),
+        "Date of the lesson": pd.to_datetime(
+            [r[1] if len(r) > 1 else None for r in data],
+            errors="coerce"
+        ),
     })
     return df[cols]
 
@@ -153,14 +156,16 @@ def load_replacements() -> pd.DataFrame:
     if len(rows) < 2:
         return pd.DataFrame(columns=cols)
 
-    data = rows[1:]
-    # попытаемся найти столбцы по именам, иначе по умолчанию 3 и 5
     header = rows[0]
-    date_idx = header.index("Date") if "Date" in header else 3
+    data = rows[1:]
+    date_idx  = header.index("Date")  if "Date"  in header else 3
     group_idx = header.index("Group") if "Group" in header else 5
 
     df = pd.DataFrame({
-        "Date":  pd.to_datetime([r[date_idx] if len(r) > date_idx else None for r in data], errors="coerce"),
+        "Date":  pd.to_datetime(
+            [r[date_idx] if len(r) > date_idx else None for r in data],
+            errors="coerce"
+        ),
         "Group": [r[group_idx] if len(r) > group_idx else pd.NA for r in data],
     })
     df["Replacement or not"] = "Replacement/Postponement"
@@ -194,7 +199,8 @@ def build_df():
 df = build_df()
 st.sidebar.header("Filters")
 filters = {
-    c: st.sidebar.multiselect(c,
+    c: st.sidebar.multiselect(
+        c,
         sorted(df[c].dropna().unique()),
         default=sorted(df[c].dropna().unique())
     )
