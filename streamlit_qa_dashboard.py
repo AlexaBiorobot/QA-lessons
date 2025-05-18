@@ -3,14 +3,12 @@ import os
 import io
 import time
 
-from google.auth.transport.requests import AuthorizedSession
-AuthorizedSession._auth_request = AuthorizedSession.request
-
 import streamlit as st
 st.set_page_config(layout="wide")
 
 import pandas as pd
 import requests
+from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 
 # === Константы ===
@@ -30,11 +28,8 @@ REPL_SS          = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 REPL_SHEET       = "Replacement"
 
 # === Auth helpers ===
-def get_session() -> AuthorizedSession:
-    """
-    Возвращает AuthorizedSession, который умеет делать
-    подпись OAuth на каждый запрос.
-    """
+@st.cache_data(show_spinner=False)
+def get_creds():
     import json
     raw = os.getenv("GCP_SERVICE_ACCOUNT")
     if raw:
@@ -42,11 +37,12 @@ def get_session() -> AuthorizedSession:
     else:
         info = st.secrets["GCP_SERVICE_ACCOUNT"]
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds = Credentials.from_service_account_info(info, scopes=scopes)
+    return Credentials.from_service_account_info(info, scopes=scopes)
 
-    session = AuthorizedSession(creds)
-    session._auth_request = session.request
-    return session
+def get_auth_header():
+    creds = get_creds()
+    creds.refresh(Request())
+    return {"Authorization": f"Bearer {creds.token}"}
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
     backoff = initial_backoff
@@ -63,17 +59,17 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
 
 # === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
-    session = get_session()
     url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
-    resp = api_retry(session.request, "GET", url, timeout=20)
+    headers = get_auth_header()
+    resp = api_retry(requests.get, url, headers=headers, timeout=20)
     resp.raise_for_status()
     return pd.read_csv(io.StringIO(resp.text), dtype=str)
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
-    session = get_session()
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}/values/{sheet_name}"
-    resp = api_retry(session.request, "GET", url)
+    headers = get_auth_header()
+    resp = api_retry(requests.get, url, headers=headers)
     resp.raise_for_status()
     return resp.json().get("values", [])
 
@@ -95,14 +91,12 @@ def load_public_lessons(ss_id: str, gid: str, region: str) -> pd.DataFrame:
 
 def load_rating(ss_id: str) -> pd.DataFrame:
     rows = fetch_values(ss_id, RATING_SHEET)
-    # header в rows[1], данные с rows[2:]
     header = rows[1]
     data   = rows[2:]
     maxc   = max(len(header), *(len(r) for r in data))
     header = header + [""]*(maxc-len(header))
     data   = [r+[""]*(maxc-len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
-    # выбираем нужные колонки
     cols = [
         "Tutor ID","Rating","Num of QA scores",
         "Num of QA scores (last 90 days)","Average QA score",
@@ -115,7 +109,6 @@ def load_rating(ss_id: str) -> pd.DataFrame:
 
 def load_qa(ss_id: str) -> pd.DataFrame:
     rows = fetch_values(ss_id, QA_SHEET)
-    # берем столбцы A,B,C,D,E => индексы 0–4
     df = pd.DataFrame(rows[1:], columns=rows[0])
     df = df[["A","E","C","D"]]
     df = df.rename(columns={"A":"Tutor ID","E":"Group","C":"QA score","D":"QA marker"})
@@ -132,26 +125,22 @@ def load_replacements() -> pd.DataFrame:
 # === Собираем всё в один DataFrame ===
 @st.cache_data(show_spinner=True)
 def build_df():
-    # уроки
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
     df     = pd.concat([df_lat, df_brz], ignore_index=True)
 
-    # рейтинг
     r_lat  = load_rating(RATING_LATAM_SS)
     r_brz  = load_rating(RATING_BRAZIL_SS)
     df = (df
           .merge(r_lat, on="Tutor ID", how="left").where(df["Region"]=="LATAM", df)
           .merge(r_brz, on="Tutor ID", how="left").where(df["Region"]=="Brazil", df))
 
-    # QA
     q_lat = load_qa(QA_LATAM_SS)
     q_brz = load_qa(QA_BRAZIL_SS)
     df = (df
           .merge(q_lat, on=["Tutor ID","Group","Date of the lesson"], how="left").where(df["Region"]=="LATAM", df)
           .merge(q_brz, on=["Tutor ID","Group","Date of the lesson"], how="left").where(df["Region"]=="Brazil", df))
 
-    # Replacement
     rp = load_replacements()
     df = df.merge(rp, left_on=["Date of the lesson","Group"], right_on=["Date","Group"], how="left")
     df["Replacement or not"] = df["Replacement or not"].fillna("")
@@ -160,8 +149,10 @@ def build_df():
 # === Streamlit UI ===
 df = build_df()
 st.sidebar.header("Filters")
-filters = {c: st.sidebar.multiselect(c, sorted(df[c].dropna().unique()), default=sorted(df[c].dropna().unique()))
-           for c in df.columns if df[c].dtype == object}
+filters = {
+    c: st.sidebar.multiselect(c, sorted(df[c].dropna().unique()), default=sorted(df[c].dropna().unique()))
+    for c in df.columns if df[c].dtype == object
+}
 
 mask = pd.Series(True, index=df.index)
 for c, sel in filters.items():
