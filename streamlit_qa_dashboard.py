@@ -57,29 +57,39 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
-# === CSV-экспорт для публичных листов (переделан через API v4) ===
+# === CSV-экспорт для публичных листов ===
 def fetch_csv(ss_id: str, gid: str) -> pd.DataFrame:
-    # сначала вытягиваем список sheets и находим title по sheetId
-    meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?fields=sheets.properties"
-    headers = get_auth_header()
-    resp = api_retry(requests.get, meta_url, headers=headers)
+    url = f"https://docs.google.com/spreadsheets/d/{ss_id}/export?format=csv&gid={gid}"
+    # пробуем Web-экспорт первым
+    resp = requests.get(url, timeout=20)
     resp.raise_for_status()
-    sheets = resp.json().get("sheets", [])
-    sheet_name = None
-    for s in sheets:
-        prop = s.get("properties", {})
-        if str(prop.get("sheetId")) == gid:
-            sheet_name = prop.get("title")
-            break
-    if sheet_name is None:
-        raise ValueError(f"Sheet with gid {gid} not found in {ss_id}")
-    # теперь тащим сами значения через API v4
-    rows = fetch_values(ss_id, sheet_name)
-    if not rows:
-        return pd.DataFrame()
-    header = rows[0]
-    data = rows[1:]
-    return pd.DataFrame(data, columns=header)
+    text = resp.text.strip()
+    # если вместо CSV вернулся HTML (Sign-in page или ошибка), падаем в API-фоллбек
+    if text.lower().startswith("<html") or text.lower().startswith("<!doctype"):
+        # узнаём title листа по sheetId через API v4
+        meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?fields=sheets.properties"
+        headers = get_auth_header()
+        m = api_retry(requests.get, meta_url, headers=headers)
+        m.raise_for_status()
+        sheets = m.json().get("sheets", [])
+        title = None
+        for s in sheets:
+            p = s.get("properties", {})
+            if str(p.get("sheetId")) == gid:
+                title = p.get("title")
+                break
+        if not title:
+            raise ValueError(f"Не найден лист с gid={gid} в {ss_id}")
+        # вытягиваем всё через API в сырой список
+        rows = fetch_values(ss_id, title)
+        if not rows:
+            return pd.DataFrame()
+        header, data = rows[0], rows[1:]
+        # строим DataFrame
+        return pd.DataFrame(data, columns=header)
+    else:
+        # CSV в порядке
+        return pd.read_csv(io.StringIO(text), dtype=str)
 
 # === Google Sheets API v4 для приватных range ===
 def fetch_values(ss_id: str, sheet_name: str) -> list[list[str]]:
@@ -112,29 +122,23 @@ def load_rating(ss_id: str) -> pd.DataFrame:
         "Average QA score (last 2 scores within last 90 days)",
         "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
     ]
-
     try:
         rows = fetch_values(ss_id, RATING_SHEET)
     except requests.HTTPError:
         return pd.DataFrame(columns=cols)
-
     if len(rows) < 2:
         return pd.DataFrame(columns=cols)
-
     header = rows[1]
     data   = rows[2:]
     maxc   = max(len(header), *(len(r) for r in data))
     header = header + [""] * (maxc - len(header))
     data   = [r + [""] * (maxc - len(r)) for r in data]
     df     = pd.DataFrame(data, columns=header)
-
     if "ID" in df.columns and "Tutor ID" not in df.columns:
         df = df.rename(columns={"ID": "Tutor ID"})
-
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
-
     return df[cols]
 
 def load_qa(ss_id: str) -> pd.DataFrame:
