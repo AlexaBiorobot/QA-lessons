@@ -218,10 +218,15 @@ def build_df():
         df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
         df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
 
-    # --- и для QA полей ---
+    # --- и для QA полей (защищённо: только если suffix-колонки есть) ---
     for col in ["QA score","QA marker"]:
-        df[col] = df[f"{col}_x"].fillna(df[f"{col}_y"])
-        df.drop([f"{col}_x", f"{col}_y"], axis=1, inplace=True)
+        lat = f"{col}_lat"
+        brz = f"{col}_brz"
+        # клеим только если хотя бы одна из колонок с суффиксом есть
+        if lat in df.columns or brz in df.columns:
+            df[col] = df.get(lat).fillna(df.get(brz))
+            # удаляем только те из суффикс-колонок, которые реально появились
+            df.drop([c for c in (lat, brz) if c in df.columns], axis=1, inplace=True))
 
     return df
 
