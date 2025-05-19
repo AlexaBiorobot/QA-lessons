@@ -234,6 +234,11 @@ start_date, end_date = st.sidebar.date_input(
     min_value=min_date,
     max_value=max_date
 )
+
+# Привести start_date, end_date к pandas.Timestamp!
+start_date = pd.to_datetime(start_date)
+end_date = pd.to_datetime(end_date)
+
 # маска: либо урок в публичке, либо запись есть только в QA
 mask = (
     ((df["Date of the lesson"] >= start_date) & (df["Date of the lesson"] <= end_date))
