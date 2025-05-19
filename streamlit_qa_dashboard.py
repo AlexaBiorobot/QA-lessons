@@ -204,20 +204,17 @@ def build_df():
     df["Replacement or not"] = df["Replacement or not"].fillna("")
     df.drop(columns=["Date"], inplace=True)
     
-    # === НОВЫЙ БЛОК: докидываем все записи из Lesson evaluation ===
+    # === НОВЫЙ БЛОК: вытягиваем дату из Lesson evaluation в отдельный столбец ===
     qa_all = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
-    # создаем каркас с пустыми колонками, как в df
-    empty = pd.DataFrame(columns=df.columns)
-    # заполняем только наши четыре поля
-    empty.loc[:, ["Tutor ID","Date of the lesson","QA score","QA marker"]] = qa_all[["Tutor ID","Date of the lesson","QA score","QA marker"]]
-    # объединяем и убираем возможные дубликаты
-    df = pd.concat([df, empty], ignore_index=True)
-    df = df.drop_duplicates(subset=["Tutor ID","Date of the lesson","QA score","QA marker"], keep="first")
+    qa_all = qa_all.rename(columns={"Date of the lesson": "Eval Date"})
+    qa_all = qa_all[["Tutor ID", "QA score", "QA marker", "Eval Date"]]
 
-    # создаём отдельный столбец с датой именно из Lesson evaluation
-    df["Eval Date"] = df["Date of the lesson"]
-    # конвертация в datetime для фильтрации
-    df["Eval Date"] = pd.to_datetime(df["Eval Date"], errors="coerce")
+    # Подшиваем к основному df по Tutor ID + QA score + QA marker
+    df = df.merge(
+        qa_all,
+        on=["Tutor ID", "QA score", "QA marker"],
+        how="left"
+    )
 
     return df
 
@@ -237,10 +234,8 @@ start_date, end_date = st.sidebar.date_input(
 )
 # маска: либо урок в публичке, либо запись есть только в QA
 mask = (
-    ((df["Date of the lesson"] >= pd.to_datetime(start_date)) &
-     (df["Date of the lesson"] <= pd.to_datetime(end_date)))
-  | ((df["Eval Date"]     >= pd.to_datetime(start_date)) &
-     (df["Eval Date"]     <= pd.to_datetime(end_date)))
+    ((df["Date of the lesson"] >= start_date) & (df["Date of the lesson"] <= end_date))
+  | ((df["Eval Date"]         >= start_date) & (df["Eval Date"]         <= end_date))
 )
 
 # 2) Остальные мультиселекты
