@@ -157,7 +157,7 @@ def load_replacements() -> pd.DataFrame:
     return df
 
 # === Собираем всё в один DF
-# @st.cache_data(show_spinner=True)
+@st.cache_data(show_spinner=True)
 def build_df():
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
@@ -214,6 +214,9 @@ def build_df():
     df = pd.concat([df, empty], ignore_index=True)
     df = df.drop_duplicates(subset=["Tutor ID","Date of the lesson","QA score","QA marker"], keep="first")
 
+    # создаём отдельный столбец с датой именно из Lesson evaluation
+    df["Eval Date"] = df["Date of the lesson"]
+
     return df
 
 # === Streamlit UI ===
@@ -221,18 +224,21 @@ df = build_df()
 
 # 1) Фильтр по диапазону дат урока (вставить перед блоком «Filters»)
 st.sidebar.header("Lesson date")
-min_date = df["Date of the lesson"].min()
-max_date = df["Date of the lesson"].max()
+# учитываем обе колонки — из публички и из QA-evaluation
+min_date = min(df["Date of the lesson"].min(), df["Eval Date"].min())
+max_date = max(df["Date of the lesson"].max(), df["Eval Date"].max())
 start_date, end_date = st.sidebar.date_input(
-    "Choose lesson dates",
+    "Choose dates",
     value=[min_date, max_date],
     min_value=min_date,
     max_value=max_date
 )
-# начинаем с маски по дате
+# маска: либо урок в публичке, либо запись есть только в QA
 mask = (
-    (df["Date of the lesson"] >= pd.to_datetime(start_date))
-  & (df["Date of the lesson"] <= pd.to_datetime(end_date))
+    ((df["Date of the lesson"] >= pd.to_datetime(start_date)) &
+     (df["Date of the lesson"] <= pd.to_datetime(end_date)))
+  | ((df["Eval Date"]     >= pd.to_datetime(start_date)) &
+     (df["Eval Date"]     <= pd.to_datetime(end_date)))
 )
 
 # 2) Остальные мультиселекты
