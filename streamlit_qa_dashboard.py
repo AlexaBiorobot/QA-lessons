@@ -164,7 +164,7 @@ def build_df():
     df_public = pd.concat([df_lat, df_brz], ignore_index=True)
 
     rating_cols = [
-        "Rating","Num of QA scores","Num of QA scores (last 90 days)",
+        "Rating w retention","Num of QA scores","Num of QA scores (last 90 days)",
         "Average QA score","Average QA score (last 2 scores within last 90 days)",
         "Average QA marker","Average QA marker (last 2 markers within last 90 days)"
     ]
