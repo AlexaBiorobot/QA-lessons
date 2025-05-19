@@ -214,6 +214,8 @@ def build_df():
     df = pd.concat([df, empty], ignore_index=True)
     df = df.drop_duplicates(subset=["Tutor ID","Date of the lesson","QA score","QA marker"], keep="first")
 
+    df["Date of the lesson"] = df["Date of the lesson"].fillna(df["Eval Date"])
+
     # создаём отдельный столбец с датой именно из Lesson evaluation
     df["Eval Date"] = df["Date of the lesson"]
 
