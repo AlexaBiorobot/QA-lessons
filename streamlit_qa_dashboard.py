@@ -216,6 +216,8 @@ def build_df():
 
     # создаём отдельный столбец с датой именно из Lesson evaluation
     df["Eval Date"] = df["Date of the lesson"]
+    # конвертация в datetime для фильтрации
+    df["Eval Date"] = pd.to_datetime(df["Eval Date"], errors="coerce")
 
     return df
 
