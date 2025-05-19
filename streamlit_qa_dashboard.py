@@ -204,20 +204,22 @@ def build_df():
     df["Replacement or not"] = df["Replacement or not"].fillna("")
     df.drop(columns=["Date"], inplace=True)
     
-    # === НОВЫЙ БЛОК: докидываем все записи из Lesson evaluation ===
+    # === НОВЫЙ СТОЛБЕЦ: дата из Lesson evaluation ===
+    # (он может быть NaT для обычных публичных уроков)
     qa_all = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
-    # создаем каркас с пустыми колонками, как в df
-    empty = pd.DataFrame(columns=df.columns)
-    # заполняем только наши четыре поля
-    empty.loc[:, ["Tutor ID","Date of the lesson","QA score","QA marker"]] = qa_all[["Tutor ID","Date of the lesson","QA score","QA marker"]]
-    # объединяем и убираем возможные дубликаты
-    df = pd.concat([df, empty], ignore_index=True)
-    df = df.drop_duplicates(subset=["Tutor ID","Date of the lesson","QA score","QA marker"], keep="first")
-
-    df["Date of the lesson"] = df["Date of the lesson"].fillna(df["Eval Date"])
-
-    # создаём отдельный столбец с датой именно из Lesson evaluation
-    df["Eval Date"] = df["Date of the lesson"]
+    # из этой таблицы у нас уже есть колонки Tutor ID, Date of the lesson, QA score, QA marker
+    # добавляем в df столбец Eval Date, заполняя его только там, где в public-датах NaT
+    df["Eval Date"] = df["Date of the lesson"]  # сначала = public-дате
+    # теперь перезаписываем её датами из QA-only записей
+    df = df.merge(
+        qa_all[["Tutor ID","Date of the lesson"]]
+          .rename(columns={"Date of the lesson":"_eval"}),
+        on="Tutor ID",
+        how="left"
+    )
+    # и затираем Eval Date там, где public_date is NaT, берет QA-only
+    df["Eval Date"] = df["Eval Date"].fillna(df["_eval"])
+    df.drop(columns="_eval", inplace=True)
 
     return df
 
@@ -237,10 +239,10 @@ start_date, end_date = st.sidebar.date_input(
 )
 # маска: либо урок в публичке, либо запись есть только в QA
 mask = (
-    ((df["Date of the lesson"] >= pd.to_datetime(start_date)) &
-     (df["Date of the lesson"] <= pd.to_datetime(end_date)))
-  | ((df["Eval Date"]     >= pd.to_datetime(start_date)) &
-     (df["Eval Date"]     <= pd.to_datetime(end_date)))
+    ((df["Date of the lesson"] >= start_date) &
+     (df["Date of the lesson"] <= end_date))
+  | ((df["Eval Date"] >= start_date) &
+     (df["Eval Date"] <= end_date))
 )
 
 # 2) Остальные мультиселекты
