@@ -157,7 +157,7 @@ def load_replacements() -> pd.DataFrame:
     return df
 
 # === Собираем всё в один DF
-@st.cache_data(show_spinner=True)
+- @st.cache_data(show_spinner=True)
 def build_df():
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
