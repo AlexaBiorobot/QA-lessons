@@ -223,27 +223,39 @@ def build_df():
 # === Streamlit UI ===
 df = build_df()
 
-# 1) Фильтр по диапазону дат урока (вставить перед блоком «Filters»)
-st.sidebar.header("Lesson date")
-# учитываем обе колонки — из публички и из QA-evaluation
-min_date = min(df["Date of the lesson"].min(), df["Eval Date"].min())
-max_date = max(df["Date of the lesson"].max(), df["Eval Date"].max())
-start_date, end_date = st.sidebar.date_input(
-    "Choose dates",
-    value=[min_date, max_date],
-    min_value=min_date,
-    max_value=max_date
+# --- Фильтр по публичной дате ---
+st.sidebar.header("Фильтр по публичной дате (Date of the lesson)")
+public_min = df["Date of the lesson"].min()
+public_max = df["Date of the lesson"].max()
+public_range = st.sidebar.date_input(
+    "Публичная дата урока",
+    value=[public_min, public_max],
+    min_value=public_min,
+    max_value=public_max,
+    key="public_date"
 )
+public_start = pd.to_datetime(public_range[0])
+public_end   = pd.to_datetime(public_range[1])
+mask_public = (df["Date of the lesson"] >= public_start) & (df["Date of the lesson"] <= public_end)
 
-# Привести start_date, end_date к pandas.Timestamp!
-start_date = pd.to_datetime(start_date)
-end_date = pd.to_datetime(end_date)
-
-# маска: либо урок в публичке, либо запись есть только в QA
-mask = (
-    ((df["Date of the lesson"] >= start_date) & (df["Date of the lesson"] <= end_date))
-  | ((df["Eval Date"]         >= start_date) & (df["Eval Date"]         <= end_date))
+# --- Фильтр по QA дате ---
+st.sidebar.header("Фильтр по QA дате (Eval Date)")
+qa_min = df["Eval Date"].min()
+qa_max = df["Eval Date"].max()
+qa_range = st.sidebar.date_input(
+    "Дата Lesson evaluation (QA)",
+    value=[qa_min, qa_max],
+    min_value=qa_min,
+    max_value=qa_max,
+    key="qa_date"
 )
+qa_start = pd.to_datetime(qa_range[0])
+qa_end   = pd.to_datetime(qa_range[1])
+mask_qa = (df["Eval Date"] >= qa_start) & (df["Eval Date"] <= qa_end)
+
+# --- Комбинированная маска ---
+# Показываем все, что проходит хотя бы по одному из фильтров:
+mask = mask_public | mask_qa
 
 # 2) Остальные мультиселекты
 st.sidebar.header("Filters")
