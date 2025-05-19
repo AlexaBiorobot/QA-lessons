@@ -156,12 +156,12 @@ def load_replacements() -> pd.DataFrame:
     })
     return df
 
-# === Собираем всё в один DF
 @st.cache_data(show_spinner=True)
 def build_df():
+    # === Публичные уроки + все твои склейки ===
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
-    df     = pd.concat([df_lat, df_brz], ignore_index=True)
+    df_public = pd.concat([df_lat, df_brz], ignore_index=True)
 
     rating_cols = [
         "Rating","Num of QA scores","Num of QA scores (last 90 days)",
@@ -172,51 +172,71 @@ def build_df():
              .rename(columns={c: c + "_lat" for c in rating_cols}))
     r_brz = (load_rating(RATING_BRAZIL_SS)
              .rename(columns={c: c + "_brz" for c in rating_cols}))
-    df = df.merge(r_lat, on="Tutor ID", how="left") \
-           .merge(r_brz, on="Tutor ID", how="left")
+    df_public = df_public.merge(r_lat, on="Tutor ID", how="left") \
+                         .merge(r_brz, on="Tutor ID", how="left")
 
-    # --- Склеиваем рейтинговые колонки обратно и отбрасываем суффиксы ---
     for c in rating_cols:
-        df[c] = df[f"{c}_lat"].fillna(df[f"{c}_brz"])
-    df.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols],
+        df_public[c] = df_public[f"{c}_lat"].fillna(df_public[f"{c}_brz"])
+    df_public.drop([f"{c}_lat" for c in rating_cols] + [f"{c}_brz" for c in rating_cols],
             axis=1, inplace=True)
 
-    # QA: сначала LATAM, переименуем поля
+    # QA-оценки: сначала LATAM, потом Brazil, как раньше
     q_lat = load_qa(QA_LATAM_SS).rename(
         columns={"QA score":"QA score_lat","QA marker":"QA marker_lat"}
     )
-    # потом Brazil
     q_brz = load_qa(QA_BRAZIL_SS).rename(
         columns={"QA score":"QA score_brz","QA marker":"QA marker_brz"}
     )
-    df = df.merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left") \
-           .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
+    df_public = df_public.merge(q_lat, on=["Tutor ID","Date of the lesson"], how="left") \
+                         .merge(q_brz, on=["Tutor ID","Date of the lesson"], how="left")
 
-    # Объединяем QA
     for base in ["QA score","QA marker"]:
-        df[base] = df[f"{base}_lat"].fillna(df[f"{base}_brz"])
-        df.drop([f"{base}_lat", f"{base}_brz"], axis=1, inplace=True)
+        df_public[base] = df_public[f"{base}_lat"].fillna(df_public[f"{base}_brz"])
+        df_public.drop([f"{base}_lat", f"{base}_brz"], axis=1, inplace=True)
 
-    # Replacements
     rp = load_replacements()
-    df = df.merge(rp, left_on=["Date of the lesson","Group"],
-                  right_on=["Date","Group"], how="left")
-    df["Replacement or not"] = df["Replacement or not"].fillna("")
-    df.drop(columns=["Date"], inplace=True)
-    
-    # === НОВЫЙ БЛОК: вытягиваем дату из Lesson evaluation в отдельный столбец ===
+    df_public = df_public.merge(rp, left_on=["Date of the lesson","Group"],
+                                right_on=["Date","Group"], how="left")
+    df_public["Replacement or not"] = df_public["Replacement or not"].fillna("")
+    df_public.drop(columns=["Date"], inplace=True)
+
+    # === Подшиваем QA evaluation датой ===
     qa_all = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
     qa_all = qa_all.rename(columns={"Date of the lesson": "Eval Date"})
     qa_all = qa_all[["Tutor ID", "QA score", "QA marker", "Eval Date"]]
-
-    # Подшиваем к основному df по Tutor ID + QA score + QA marker
-    df = df.merge(
+    df_public = df_public.merge(
         qa_all,
         on=["Tutor ID", "QA score", "QA marker"],
         how="left"
     )
 
-    df["Eval Date"] = pd.to_datetime(df["Eval Date"], errors="coerce")
+    df_public["Eval Date"] = pd.to_datetime(df_public["Eval Date"], errors="coerce")
+    df_public["Source"] = "Public"
+
+    # === QA-only: всё что не попало в публичные ===
+    df_qa_full = pd.concat([load_qa(QA_LATAM_SS), load_qa(QA_BRAZIL_SS)], ignore_index=True)
+    df_qa_full = df_qa_full.rename(columns={"Date of the lesson": "Eval Date"})
+    # Оставим только те строки, которых нет в df_public по 3-м полям
+    merged = df_qa_full.merge(
+        df_public[["Tutor ID", "QA score", "QA marker", "Eval Date"]],
+        on=["Tutor ID", "QA score", "QA marker", "Eval Date"],
+        how="left",
+        indicator=True
+    )
+    df_qa_only = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
+    # Добавим пустые столбцы для совместимости
+    for col in df_public.columns:
+        if col not in df_qa_only.columns:
+            df_qa_only[col] = pd.NA
+    df_qa_only["Source"] = "QA"
+
+    # Совместим по структуре
+    df_qa_only = df_qa_only[df_public.columns]
+
+    # Итоговый датафрейм: оба датафрейма вместе
+    df = pd.concat([df_public, df_qa_only], ignore_index=True)
+    # (опционально) — если нужна сортировка по дате
+    # df = df.sort_values(by=["Eval Date", "Date of the lesson"], ascending=False)
 
     return df
 
