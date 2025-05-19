@@ -161,6 +161,13 @@ def build_df():
     # === Публичные уроки + все твои склейки ===
     df_lat = load_public_lessons(LESSONS_SS, LATAM_GID, "LATAM")
     df_brz = load_public_lessons(LESSONS_SS, BRAZIL_GID, "Brazil")
+    
+    tutor_id = "1844710"
+    latam_rating = load_rating(RATING_LATAM_SS)
+    brazil_rating = load_rating(RATING_BRAZIL_SS)
+    print("LATAM:", latam_rating[latam_rating["Tutor ID"] == tutor_id])
+    print("Brazil:", brazil_rating[brazil_rating["Tutor ID"] == tutor_id])
+    
     df_public = pd.concat([df_lat, df_brz], ignore_index=True)
 
     rating_cols = [
