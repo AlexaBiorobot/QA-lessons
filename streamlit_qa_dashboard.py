@@ -172,28 +172,6 @@ def build_df():
              .rename(columns={c: c + "_lat" for c in rating_cols}))
     r_brz = (load_rating(RATING_BRAZIL_SS)
              .rename(columns={c: c + "_brz" for c in rating_cols}))
-    
-    # ============ ПРОВЕРКА Tutor ID ============
-    # Tutor ID, который проверяешь:
-    check_id = "1844710"
-    
-    # Подгрузи оригинальные рейтинги без переименования колонок:
-    latam_df = load_rating(RATING_LATAM_SS)
-    brazil_df = load_rating(RATING_BRAZIL_SS)
-    
-    # Приведи Tutor ID к строке и убери пробелы (ВАЖНО!):
-    latam_df["Tutor ID"] = latam_df["Tutor ID"].astype(str).str.strip()
-    brazil_df["Tutor ID"] = brazil_df["Tutor ID"].astype(str).str.strip()
-    df_public["Tutor ID"] = df_public["Tutor ID"].astype(str).str.strip()
-    
-    # Покажи строки с этим Tutor ID:
-    st.write("\n==== LATAM рейтинг ====")
-    st.write(latam_df[latam_df["Tutor ID"] == check_id])
-    st.write("\n==== Brazil рейтинг ====")
-    st.write(brazil_df[brazil_df["Tutor ID"] == check_id])
-    st.write("\n==== В уроках (df_public) ====")
-    st.write(df_public[df_public["Tutor ID"] == check_id])
-    st.write("\n=========================\n")
 
     df_public = df_public.merge(r_lat, on="Tutor ID", how="left") \
                          .merge(r_brz, on="Tutor ID", how="left")
