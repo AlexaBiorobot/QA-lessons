@@ -3,3 +3,4 @@ pandas
 requests
 gspread
 google-auth>=2.0.0
+oauth2client
