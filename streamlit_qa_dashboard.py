@@ -216,6 +216,8 @@ def build_df():
         how="left"
     )
 
+    df["Eval Date"] = pd.to_datetime(df["Eval Date"], errors="coerce")
+
     return df
 
 # === Streamlit UI ===
