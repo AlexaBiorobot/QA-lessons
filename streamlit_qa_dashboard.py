@@ -187,13 +187,13 @@ def build_df():
     df_public["Tutor ID"] = df_public["Tutor ID"].astype(str).str.strip()
     
     # Покажи строки с этим Tutor ID:
-    print("\n==== LATAM рейтинг ====")
-    print(latam_df[latam_df["Tutor ID"] == check_id])
-    print("\n==== Brazil рейтинг ====")
-    print(brazil_df[brazil_df["Tutor ID"] == check_id])
-    print("\n==== В уроках (df_public) ====")
-    print(df_public[df_public["Tutor ID"] == check_id])
-    print("\n=========================\n")
+    st.write("\n==== LATAM рейтинг ====")
+    st.write(latam_df[latam_df["Tutor ID"] == check_id])
+    st.write("\n==== Brazil рейтинг ====")
+    st.write(brazil_df[brazil_df["Tutor ID"] == check_id])
+    st.write("\n==== В уроках (df_public) ====")
+    st.write(df_public[df_public["Tutor ID"] == check_id])
+    st.write("\n=========================\n")
 
     df_public = df_public.merge(r_lat, on="Tutor ID", how="left") \
                          .merge(r_brz, on="Tutor ID", how="left")
