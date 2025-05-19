@@ -225,8 +225,12 @@ df = build_df()
 
 # --- Фильтр по публичной дате ---
 st.sidebar.header("Фильтр по публичной дате (Date of the lesson)")
-public_min = df["Date of the lesson"].min()
-public_max = df["Date of the lesson"].max()
+if df["Date of the lesson"].notna().any():
+    public_min = df["Date of the lesson"].min()
+    public_max = df["Date of the lesson"].max()
+else:
+    public_min = pd.Timestamp("2020-01-01")
+    public_max = pd.Timestamp.today()
 public_range = st.sidebar.date_input(
     "Публичная дата урока",
     value=[public_min, public_max],
@@ -240,8 +244,12 @@ mask_public = (df["Date of the lesson"] >= public_start) & (df["Date of the less
 
 # --- Фильтр по QA дате ---
 st.sidebar.header("Фильтр по QA дате (Eval Date)")
-qa_min = df["Eval Date"].min()
-qa_max = df["Eval Date"].max()
+if df["Eval Date"].notna().any():
+    qa_min = df["Eval Date"].min()
+    qa_max = df["Eval Date"].max()
+else:
+    qa_min = pd.Timestamp("2020-01-01")
+    qa_max = pd.Timestamp.today()
 qa_range = st.sidebar.date_input(
     "Дата Lesson evaluation (QA)",
     value=[qa_min, qa_max],
@@ -254,7 +262,6 @@ qa_end   = pd.to_datetime(qa_range[1])
 mask_qa = (df["Eval Date"] >= qa_start) & (df["Eval Date"] <= qa_end)
 
 # --- Комбинированная маска ---
-# Показываем все, что проходит хотя бы по одному из фильтров:
 mask = mask_public | mask_qa
 
 # 2) Остальные мультиселекты
