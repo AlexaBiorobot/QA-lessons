@@ -237,6 +237,23 @@ def build_df():
 
     # Итоговый датафрейм: оба датафрейма вместе
     df = pd.concat([df_public, df_qa_only], ignore_index=True)
+
+    # Заполняем пустые поля из публичных данных по Tutor ID
+    static_cols = [
+        "Tutor name", "Region", "Group", "Course ID", "Module", "Lesson", "Lesson Link",
+        "Rating w retention", "Num of QA scores", "Num of QA scores (last 90 days)",
+        "Average QA score", "Average QA score (last 2 scores within last 90 days)",
+        "Average QA marker", "Average QA marker (last 2 markers within last 90 days)"
+    ]
+    tutor_static = (
+        df_public
+        .dropna(subset=["Tutor ID"])[["Tutor ID"] + static_cols]
+        .drop_duplicates(subset=["Tutor ID"], keep="first")
+        .set_index("Tutor ID")
+    )
+    for col in static_cols:
+        df[col] = df[col].fillna(df["Tutor ID"].map(tutor_static[col]))
+        
     # (опционально) — если нужна сортировка по дате
     # df = df.sort_values(by=["Eval Date", "Date of the lesson"], ascending=False)
 
