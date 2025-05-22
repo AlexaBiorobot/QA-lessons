@@ -250,7 +250,7 @@ show_qa = st.sidebar.checkbox("Показать QA-уроки (Lesson evaluation
 
 # 2. Фильтр по публичной дате
 if show_public:
-    st.sidebar.header("Фильтр по публичной дате (Date of the lesson)")
+    st.sidebar.header("All lessons")
     if df["Date of the lesson"].notna().any():
         public_min = df["Date of the lesson"].min()
         public_max = df["Date of the lesson"].max()
@@ -258,7 +258,7 @@ if show_public:
         public_min = pd.Timestamp("2020-01-01")
         public_max = pd.Timestamp.today()
     public_range = st.sidebar.date_input(
-        "Публичная дата урока",
+        "Lesson date",
         value=[public_min, public_max],
         min_value=public_min,
         max_value=public_max,
@@ -272,7 +272,7 @@ else:
 
 # 3. Фильтр по QA дате
 if show_qa:
-    st.sidebar.header("Фильтр по QA дате (Eval Date)")
+    st.sidebar.header("Lesson evaluated by QA")
     if df["Eval Date"].notna().any():
         qa_min = df["Eval Date"].min()
         qa_max = df["Eval Date"].max()
@@ -280,7 +280,7 @@ if show_qa:
         qa_min = pd.Timestamp("2020-01-01")
         qa_max = pd.Timestamp.today()
     qa_range = st.sidebar.date_input(
-        "Дата Lesson evaluation (QA)",
+        "Lesson date (QA evaluated)",
         value=[qa_min, qa_max],
         min_value=qa_min,
         max_value=qa_max,
@@ -314,7 +314,7 @@ for c, sel in filters.items():
 
 dff = df[mask]
 
-st.title("📊 QA & Rating Dashboard")
+st.title("📊 QA queue (Latam and Brazil)")
 st.dataframe(dff, use_container_width=True)
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
