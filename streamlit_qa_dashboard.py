@@ -207,7 +207,8 @@ def build_df():
     qa_all = qa_all[["Tutor ID", "QA score", "QA marker", "Eval Date"]]
     df_public = df_public.merge(
         qa_all,
-        on=["Tutor ID", "QA score", "QA marker"],
+        left_on=["Tutor ID", "QA score", "QA marker", "Date of the lesson"],
+        right_on=["Tutor ID", "QA score", "QA marker", "Eval Date"],
         how="left"
     )
 
