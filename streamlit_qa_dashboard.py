@@ -265,6 +265,7 @@ df = build_df()
 # 1. Чекбоксы
 show_public = st.sidebar.checkbox("Show public lessons", value=True)
 show_qa = st.sidebar.checkbox("Show lessons evaluated by QA", value=True)
+hide_na = st.sidebar.checkbox("Don't show #N/A", value=False)
 
 # 2. Фильтр по публичной дате
 if show_public:
@@ -312,6 +313,10 @@ else:
 
 # 4. Комбинированная маска (НЕ меняется!)
 mask = mask_public | mask_qa
+
+if hide_na:
+    # Отбрасываем все строки, где в Tutor ID пусто или NA
+    mask &= df["Tutor ID"].notna()
 
 # 2) Остальные мультиселекты
 st.sidebar.header("Filters")
