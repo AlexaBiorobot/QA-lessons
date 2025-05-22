@@ -245,8 +245,8 @@ def build_df():
 df = build_df()
 
 # 1. Чекбоксы
-show_public = st.sidebar.checkbox("Показать публичные уроки", value=True)
-show_qa = st.sidebar.checkbox("Показать QA-уроки (Lesson evaluation)", value=True)
+show_public = st.sidebar.checkbox("Show public lessons", value=True)
+show_qa = st.sidebar.checkbox("Show lessons evaluated by QA", value=True)
 
 # 2. Фильтр по публичной дате
 if show_public:
