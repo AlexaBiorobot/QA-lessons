@@ -338,6 +338,8 @@ for c, sel in filters.items():
 dff = df[mask]
 
 st.title("📊 QA queue (Latam and Brazil)")
+row_count = dff.shape[0]
+st.markdown(f"**Rows displayed:** {row_count}")
 st.dataframe(dff, use_container_width=True)
 csv = dff.to_csv(index=False)
 st.download_button("📥 Download CSV", csv, "qa_dashboard.csv", "text/csv")
