@@ -315,8 +315,8 @@ else:
 mask = mask_public | mask_qa
 
 if hide_na:
-    tid = df["Tutor ID"].fillna("").astype(str).str.strip()
-    mask &= (tid != "") & (tid.upper() != "#N/A")
+    tid = df["Tutor ID"].fillna("").astype(str).str.strip().str.upper()
+    mask &= (tid != "") & (tid != "#N/A")
 
 # 2) Остальные мультиселекты
 st.sidebar.header("Filters")
