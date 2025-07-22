@@ -110,7 +110,7 @@ def main():
     # Запись в целевой лист
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
-    ws_dst.clear()
+    ws_dst.batch_clear(["A:AI"])
     set_with_dataframe(ws_dst, df, row=1, col=1, include_index=False, include_column_header=True)
     logging.info(f"✔ Данные записаны в «{DEST_SHEET_NAME}» — {df.shape[0]} строк")
 
