@@ -85,7 +85,7 @@ def main():
 
     # Фильтруем по B
     values_to_keep = ["COL", "ESP", "CHI"]
-    mask = df[df.columns[1]].isin(values_to_keep)
+    mask = df[df.columns[1]].str.contains('|'.join(values_to_keep), na=False)
     filtered_df = df[mask].reset_index(drop=True)
     logging.info(f"→ Получено строк после фильтрации: {filtered_df.shape[0]}")
 
