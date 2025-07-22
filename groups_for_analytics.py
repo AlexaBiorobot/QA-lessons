@@ -83,6 +83,11 @@ def main():
     # В датафрейм
     df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
 
+    print("Всего строк (без заголовка):", len(df))
+    print("Первые 5 строк:")
+    print(df.head())
+
+
     # Фильтруем по B
     values_to_keep = ["COL", "ESP", "CHI"]
     mask = df[df.columns[1]].str.contains('|'.join(values_to_keep), na=False)
