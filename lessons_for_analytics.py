@@ -4,7 +4,6 @@ import json
 import logging
 import time
 import io
-import datetime
 
 import pandas as pd
 import gspread
@@ -83,26 +82,6 @@ def main():
 
     # В датафрейм
     df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
-
-    # Предположим, что столбец B — это второй столбец:
-    date_col = df.columns[1]
-    # Попробуем распарсить даты; если у вас формат «день.месяц.год», можно указать dayfirst=True:
-    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-
-    # Отбросим строки, где дата не распарсилась
-    before_drop = len(df)
-    df = df[df[date_col].notna()]
-    logging.info(f"→ Отброшено {before_drop - len(df)} строк без валидной даты")
-
-    # Текущий год и месяц
-    today = datetime.date.today()
-    current_year, current_month = today.year, today.month
-
-    # Фильтруем по текущему месяцу
-    mask = (df[date_col].dt.year  == current_year) & \
-           (df[date_col].dt.month == current_month)
-    filtered_df = df.loc[mask].reset_index(drop=True)
-    logging.info(f"→ Строк за {today.strftime('%B %Y')}: {filtered_df.shape[0]}")
 
     # Записываем в целевой лист (как было)
     sh_dst = api_retry_open(client, DEST_SS_ID)
