@@ -1,0 +1,29 @@
+name: Lessons For Analytics (every 12h)
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:  # запуск вручную из Actions UI
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11  # или другой нужный тебе
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas gspread oauth2client gspread-dataframe
+
+      - name: Run script
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: python lessons_for_analytics.py
