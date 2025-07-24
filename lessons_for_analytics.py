@@ -89,7 +89,7 @@ def main():
         df_old = pd.DataFrame(columns=headers)
 
     # 3) Определяем ключ — колонка D с ID урока
-    key = "D"
+    key = "lesson_id"
 
     # 4) Выбираем строки, которых нет в df_old
     existing_ids = set(df_old[key])
