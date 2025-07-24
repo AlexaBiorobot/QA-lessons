@@ -8,7 +8,6 @@ import io
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from gspread_dataframe import set_with_dataframe
 from gspread.exceptions import APIError, WorksheetNotFound
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -63,41 +62,52 @@ def fetch_all_values_with_retries(ws, max_attempts=5, backoff=1.0):
             raise
 
 def main():
-    # Авторизация (как было)
+    # 1) Авторизация, чтение source (ваш код)
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
     client = gspread.authorize(creds)
-    logging.info("✔ Авторизованы в Google Sheets")
 
-    # Открываем исходный лист
     sh_src = api_retry_open(client, SOURCE_SS_ID)
     ws_src = api_retry_worksheet(sh_src, SOURCE_SHEET_NAME)
-
-    # Грузим все значения
     all_vals = fetch_all_values_with_retries(ws_src)
     if not all_vals or len(all_vals) < 2:
         logging.error("❌ Нет данных для импорта.")
         return
 
-    # В датафрейм
-    df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
+    # Заголовки и DataFrame новых данных
+    headers = all_vals[0]
+    df_new = pd.DataFrame(all_vals[1:], columns=headers)
 
-    df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
-
-    # Если вы больше не хотите фильтровать — просто пишем весь df:
+    # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
-    ws_dst.clear()  # Очищаем целевой лист
-    set_with_dataframe(
-        ws_dst,
-        df,
-        row=1,
-        col=1,
-        include_index=False,
-        include_column_header=True
-    )
-    logging.info(f"✔ Всего строк записано: {df.shape[0]}")
+    old_vals = ws_dst.get_all_values()
+    if old_vals and len(old_vals) > 1:
+        df_old = pd.DataFrame(old_vals[1:], columns=old_vals[0])
+    else:
+        df_old = pd.DataFrame(columns=headers)
+
+    # 3) Определяем ключ — колонка D с ID урока
+    key = "D"
+
+    # 4) Выбираем строки, которых нет в df_old
+    existing_ids = set(df_old[key])
+    mask = ~df_new[key].isin(existing_ids)
+    to_append = df_new.loc[mask]
+
+    # 5) Добавляем только новые строки
+    if not to_append.empty:
+        logging.info(f"→ Добавляем {len(to_append)} новых строк")
+        # append_rows ожидает список списков без заголовков
+        ws_dst.append_rows(
+            to_append.values.tolist(),
+            value_input_option="RAW"
+        )
+    else:
+        logging.info("→ Новых строк не найдено")
+
+    logging.info("✔ Импорт завершён")
 
 if __name__ == "__main__":
     main()
