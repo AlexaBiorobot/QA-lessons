@@ -83,13 +83,21 @@ def main():
     # В датафрейм
     df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
 
-    # Записываем в целевой лист (как было)
+    df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
+
+    # Если вы больше не хотите фильтровать — просто пишем весь df:
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
-    ws_dst.clear()
-    set_with_dataframe(ws_dst, filtered_df, row=1, col=1,
-                       include_index=False, include_column_header=True)
-    logging.info(f"✔ Данные за {today.strftime('%B %Y')} записаны — {filtered_df.shape[0]} строк")
+    ws_dst.clear()  # Очищаем целевой лист
+    set_with_dataframe(
+        ws_dst,
+        df,
+        row=1,
+        col=1,
+        include_index=False,
+        include_column_header=True
+    )
+    logging.info(f"✔ Всего строк записано: {df.shape[0]}")
 
 if __name__ == "__main__":
     main()
