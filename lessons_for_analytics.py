@@ -70,32 +70,9 @@ def main():
 
     sh_src = api_retry_open(client, SOURCE_SS_ID)
     ws_src = api_retry_worksheet(sh_src, SOURCE_SHEET_NAME)
-    all_vals = fetch_all_values_with_retries(ws_src)
-    if not all_vals or len(all_vals) < 2:
-        logging.error("❌ Нет данных для импорта.")
-        return
-
-    # Заголовки и DataFrame новых данных
-    headers = all_vals[0]
-    df_new = pd.DataFrame(all_vals[1:], columns=headers)
-
-    # Приведение числовых колонок к числам
-    numeric_columns = [
-        "timetable_id", "lesson_id", "lesson_number", "group_id",
-        "course_id", "teacher_id", "students_payed",
-        "new_group_duration_mins", "record_duration_mins"
-    ]
-    for col in numeric_columns:
-        if col in df_new.columns:
-            df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
     
-    # Приведение дат и времени к строкам, чтобы не было ошибок сериализации
-    for col in ["lesson_date", "start_date"]:
-        if col in df_new.columns:
-            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.strftime("%Y-%m-%d")
-    
-    if "lesson_time" in df_new.columns:
-        df_new["lesson_time"] = pd.to_datetime(df_new["lesson_time"], errors="coerce").dt.strftime("%H:%M")
+    records = ws_src.get_all_records()
+    df_new = pd.DataFrame(records)
 
 
     # 2) Читаем уже импортированные данные
@@ -105,14 +82,14 @@ def main():
     if old_vals and len(old_vals) > 1:
         df_old = pd.DataFrame(old_vals[1:], columns=old_vals[0])
     else:
-        df_old = pd.DataFrame(columns=headers)
+        df_old = pd.DataFrame(columns=df_new.columns)
 
     # 3) Определяем ключ — колонка D с ID урока
     key = "lesson_id"
 
     # 4) Выбираем строки, которых нет в df_old
-    df_new[key] = df_new[key].astype(str)       
-    existing_ids = set(df_old[key].astype(str))  
+    df_old[key] = pd.to_numeric(df_old[key], errors="coerce")
+    existing_ids = set(df_old[key].dropna()) 
     mask = ~df_new[key].isin(existing_ids)
     to_append = df_new.loc[mask]
 
