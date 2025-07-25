@@ -111,7 +111,8 @@ def main():
     key = "lesson_id"
 
     # 4) Выбираем строки, которых нет в df_old
-    existing_ids = set(df_old[key])
+    df_new[key] = df_new[key].astype(str)       
+    existing_ids = set(df_old[key].astype(str))  
     mask = ~df_new[key].isin(existing_ids)
     to_append = df_new.loc[mask]
 
