@@ -79,10 +79,26 @@ def main():
     headers = all_vals[0]
     df_new = pd.DataFrame(all_vals[1:], columns=headers)
 
-    cols_to_convert = ["timetable_id", "lesson_date", "lesson_time", "lesson_id", "lesson_module", "lesson_number", "group_id", "start_date", "course_id", "teacher_id", "students_payed", "new_group_duration_mins", "record_duration_mins"]  # <-- Укажи нужные по имени!
-    for col in cols_to_convert:
+    # Преобразование типов
+    numeric_columns = [
+        "timetable_id", "lesson_id", "lesson_number", "group_id",
+        "course_id", "teacher_id", "students_payed", "new_group_duration_mins", "record_duration_mins"
+    ]
+    date_columns = ["lesson_date", "start_date"]
+    time_columns = ["lesson_time"]
+    
+    for col in numeric_columns:
         if col in df_new.columns:
             df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
+    
+    for col in date_columns:
+        if col in df_new.columns:
+            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.date
+    
+    for col in time_columns:
+        if col in df_new.columns:
+            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.time
+
 
     # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
@@ -104,13 +120,9 @@ def main():
     # 5) Добавляем только новые строки
     if not to_append.empty:
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
-
-        # Заменяем NaN и бесконечности на пустые строки (или 0, если нужно)
-        to_append_clean = to_append.replace([pd.NA, pd.NaT, float('inf'), float('-inf')], "").fillna("")
-
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
-            to_append_clean.values.tolist(),
+            to_append.values.tolist(),
             value_input_option="RAW"
         )
     else:
