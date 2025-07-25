@@ -74,6 +74,14 @@ def main():
     records = ws_src.get_all_records()
     df_new = pd.DataFrame(records)
 
+    # Преобразуем даты и время к нужным типам
+    for col in ["lesson_date", "start_date"]:
+        if col in df_new.columns:
+            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.date  # Только дата
+    
+    if "lesson_time" in df_new.columns:
+        df_new["lesson_time"] = pd.to_datetime(df_new["lesson_time"], errors="coerce").dt.time  # Только время
+
 
     # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
