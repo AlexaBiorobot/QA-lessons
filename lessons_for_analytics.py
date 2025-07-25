@@ -79,6 +79,25 @@ def main():
     headers = all_vals[0]
     df_new = pd.DataFrame(all_vals[1:], columns=headers)
 
+    # Приведение числовых колонок к числам
+    numeric_columns = [
+        "timetable_id", "lesson_id", "lesson_number", "group_id",
+        "course_id", "teacher_id", "students_payed",
+        "new_group_duration_mins", "record_duration_mins"
+    ]
+    for col in numeric_columns:
+        if col in df_new.columns:
+            df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
+    
+    # Приведение дат и времени к строкам, чтобы не было ошибок сериализации
+    for col in ["lesson_date", "start_date"]:
+        if col in df_new.columns:
+            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.strftime("%Y-%m-%d")
+    
+    if "lesson_time" in df_new.columns:
+        df_new["lesson_time"] = pd.to_datetime(df_new["lesson_time"], errors="coerce").dt.strftime("%H:%M")
+
+
     # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
