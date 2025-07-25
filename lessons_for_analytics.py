@@ -60,6 +60,18 @@ def fetch_all_values_with_retries(ws, max_attempts=5, backoff=1.0):
                 continue
             logging.error(f"get_all_values failed: {e}")
             raise
+            
+from datetime import date, time, datetime
+
+def convert_for_sheets(df):
+    for col in df.columns:
+        # Преобразуем datetime.date и datetime.time в строки
+        df[col] = df[col].apply(
+            lambda x: x.strftime("%Y-%m-%d") if isinstance(x, date) and not isinstance(x, datetime)
+            else x.strftime("%H:%M:%S") if isinstance(x, time)
+            else x
+        )
+    return df
 
 def main():
     # 1) Авторизация, чтение source (ваш код)
