@@ -120,6 +120,7 @@ def main():
     # 5) Добавляем только новые строки
     if not to_append.empty:
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
+        to_append = convert_for_sheets(to_append)
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
             to_append.values.tolist(),
