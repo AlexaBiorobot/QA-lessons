@@ -74,13 +74,24 @@ def main():
     records = ws_src.get_all_records()
     df_new = pd.DataFrame(records)
 
-    # Преобразуем даты и время к нужным типам
+    from datetime import datetime
+    
+    def datetime_to_gsheet_number(dt):
+        epoch = datetime(1899, 12, 30)
+        return (dt - epoch).days + (dt - epoch).seconds / 86400
+    
+    # lesson_date и start_date → полные даты в числовом виде Google Sheets
     for col in ["lesson_date", "start_date"]:
         if col in df_new.columns:
-            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.date  # Только дата
+            df_new[col] = pd.to_datetime(df_new[col], errors="coerce")
+            df_new[col] = df_new[col].apply(lambda x: datetime_to_gsheet_number(x) if pd.notnull(x) else "")
     
+    # lesson_time → только время (дробь от суток)
     if "lesson_time" in df_new.columns:
-        df_new["lesson_time"] = pd.to_datetime(df_new["lesson_time"], errors="coerce").dt.time  # Только время
+        df_new["lesson_time"] = pd.to_datetime(df_new["lesson_time"], errors="coerce")
+        df_new["lesson_time"] = df_new["lesson_time"].apply(
+            lambda x: x.hour / 24 + x.minute / 1440 + x.second / 86400 if pd.notnull(x) else ""
+        )
 
 
     # 2) Читаем уже импортированные данные
@@ -106,7 +117,7 @@ def main():
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
         
         # 🔧 Убираем невалидные JSON-значения: NaN, inf, -inf
-        to_append = to_append.replace([pd.NA, pd.NaT, float('inf'), float('-inf')], "").fillna("")
+        to_append = to_append.replace([float('inf'), float('-inf')], pd.NA).fillna("")
         
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
