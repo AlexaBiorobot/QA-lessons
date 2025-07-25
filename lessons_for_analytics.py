@@ -118,6 +118,10 @@ def main():
     # 5) Добавляем только новые строки
     if not to_append.empty:
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
+        
+        # 🔧 Убираем невалидные JSON-значения: NaN, inf, -inf
+        to_append = to_append.replace([pd.NA, pd.NaT, float('inf'), float('-inf')], "").fillna("")
+        
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
             to_append.values.tolist(),
