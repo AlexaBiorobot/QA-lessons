@@ -60,18 +60,6 @@ def fetch_all_values_with_retries(ws, max_attempts=5, backoff=1.0):
                 continue
             logging.error(f"get_all_values failed: {e}")
             raise
-            
-from datetime import date, time, datetime
-
-def convert_for_sheets(df):
-    for col in df.columns:
-        # Преобразуем datetime.date и datetime.time в строки
-        df[col] = df[col].apply(
-            lambda x: x.strftime("%Y-%m-%d") if isinstance(x, date) and not isinstance(x, datetime)
-            else x.strftime("%H:%M:%S") if isinstance(x, time)
-            else x
-        )
-    return df
 
 def main():
     # 1) Авторизация, чтение source (ваш код)
@@ -90,27 +78,6 @@ def main():
     # Заголовки и DataFrame новых данных
     headers = all_vals[0]
     df_new = pd.DataFrame(all_vals[1:], columns=headers)
-
-    # Преобразование типов
-    numeric_columns = [
-        "timetable_id", "lesson_id", "lesson_number", "group_id",
-        "course_id", "teacher_id", "students_payed", "new_group_duration_mins", "record_duration_mins"
-    ]
-    date_columns = ["lesson_date", "start_date"]
-    time_columns = ["lesson_time"]
-    
-    for col in numeric_columns:
-        if col in df_new.columns:
-            df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
-    
-    for col in date_columns:
-        if col in df_new.columns:
-            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.date
-    
-    for col in time_columns:
-        if col in df_new.columns:
-            df_new[col] = pd.to_datetime(df_new[col], errors="coerce").dt.time
-
 
     # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
@@ -132,7 +99,6 @@ def main():
     # 5) Добавляем только новые строки
     if not to_append.empty:
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
-        to_append = convert_for_sheets(to_append)
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
             to_append.values.tolist(),
