@@ -104,9 +104,13 @@ def main():
     # 5) Добавляем только новые строки
     if not to_append.empty:
         logging.info(f"→ Добавляем {len(to_append)} новых строк")
+
+        # Заменяем NaN и бесконечности на пустые строки (или 0, если нужно)
+        to_append_clean = to_append.replace([pd.NA, pd.NaT, float('inf'), float('-inf')], "").fillna("")
+
         # append_rows ожидает список списков без заголовков
         ws_dst.append_rows(
-            to_append.values.tolist(),
+            to_append_clean.values.tolist(),
             value_input_option="RAW"
         )
     else:
