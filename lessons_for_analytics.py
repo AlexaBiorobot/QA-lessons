@@ -79,6 +79,11 @@ def main():
     headers = all_vals[0]
     df_new = pd.DataFrame(all_vals[1:], columns=headers)
 
+    cols_to_convert = ["timetable_id", "lesson_date", "lesson_time", "lesson_id", "lesson_module", "lesson_number", "group_id", "start_date", "course_id", "teacher_id", "students_payed", "new_group_duration_mins", "record_duration_mins"]  # <-- Укажи нужные по имени!
+    for col in cols_to_convert:
+        if col in df_new.columns:
+            df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
+
     # 2) Читаем уже импортированные данные
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
