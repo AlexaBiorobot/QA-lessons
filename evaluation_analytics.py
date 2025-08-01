@@ -20,7 +20,7 @@ SRC1_SHEET_NAME = "QA Workspace Archive"
 SRC1_COLS = list(range(0, 35))  # A:AI = 0:34
 
 SRC2_SS_ID = "1gV9STzFPKMeIkVO6MFILzC-v2O6cO3XZyi4sSstgd8A"
-SRC2_SHEET_NAME = "All lesson reviews"
+SRC2_SHEET_NAME = "All lesson reviews OLD"
 SRC2_COLS = list(range(2, 18))  # C:R = 2:17
 
 DEST_SS_ID = "1yJmskKLGinBNKIV3ewXsVEfnh-JRj_FhuKyElL93vM4"
