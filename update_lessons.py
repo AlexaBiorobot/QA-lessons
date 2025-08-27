@@ -65,11 +65,17 @@ def main():
     header = rows[0]
     df     = pd.DataFrame(out, columns=header)
 
-    # 5) Очищаем диапазон A2:Q и записываем данные с retry
+    # 5) Очищаем диапазон A2:Q (только до конца старых данных) и записываем новые
     sh_dst = api_retry(client.open_by_key, DST_SS_ID)
     ws_dst = api_retry(sh_dst.worksheet, DST_SHEET_NAME)
-
-    api_retry(ws_dst.batch_clear, ["A2:Q"])
+    
+    # сколько сейчас строк занято в A2:Q
+    existing = api_retry(ws_dst.get, "A2:Q")
+    end_row = 1 + len(existing)  # A2…A{end_row}
+    
+    if end_row >= 2:
+        api_retry(ws_dst.batch_clear, [f"A2:Q{end_row}"])
+    
     api_retry(
         set_with_dataframe,
         ws_dst,
@@ -77,7 +83,8 @@ def main():
         row=2,
         col=1,
         include_index=False,
-        include_column_header=False
+        include_column_header=False,
+        resize=False   # ← чтобы не чистились столбцы справа
     )
 
     logging.info(f"✔ Written {len(df)} rows to '{DST_SHEET_NAME}' starting at A2")
