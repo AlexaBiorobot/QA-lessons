@@ -15,8 +15,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # Настройки
 SOURCE_SS_ID = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 SOURCE_SHEET_NAME = "lessons LATAM"
-DEST_SS_ID = "1XwyahhHC7uVzwfoErrvwrcruEjwewqIUp2u-6nvdSR0"
-DEST_SHEET_NAME = "lesson data"
+DEST_SS_ID = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
+DEST_SHEET_NAME = "Lessons source"
 
 def api_retry_open(client, key, max_attempts=5, backoff=1.0):
     for i in range(1, max_attempts+1):
