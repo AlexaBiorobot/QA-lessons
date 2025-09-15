@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import datetime
 import re
+import string
 
 import pandas as pd
 import gspread
@@ -13,13 +14,16 @@ from gspread.exceptions import APIError, WorksheetNotFound
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# Настройки
+# ==== Настройки ====
 SOURCE_SS_ID = "1_S-NyaVKuOc0xK12PBAYvdIauDBq9mdqHlnKLfSYNAE"
 SOURCE_SHEET_NAME = "lessons LATAM"
 DEST_SS_ID = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 DEST_SHEET_NAME = "Lessons source"
 
-KEY_COL = "lesson_id"  # ключ для дедупликации
+# Ключ можно указать ИМЕНЕМ колонки (если есть шапка) ИЛИ буквой столбца (позиция)
+KEY_COL_NAME = "lesson_id"   # опционально
+KEY_COL_LETTER = "D"         # приоритетно; D = 4-й столбец (0-индекс 3)
+# ====================
 
 def api_retry_open(client, key, max_attempts=5, backoff=1.0):
     for i in range(1, max_attempts+1):
@@ -50,20 +54,6 @@ def api_retry_worksheet(sh, title, max_attempts=5, backoff=1.0):
             logging.error(f"Worksheet '{title}' not found")
             raise
 
-def fetch_all_values_with_retries(ws, max_attempts=5, backoff=1.0):
-    for i in range(1, max_attempts+1):
-        try:
-            logging.info(f"get_all_values() attempt {i}/{max_attempts}")
-            return ws.get_all_values()
-        except APIError as e:
-            code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
-            if code and 500 <= int(code) < 600 and i < max_attempts:
-                logging.warning(f"get_all_values got {code}, retrying in {backoff:.1f}s")
-                time.sleep(backoff); backoff *= 2
-                continue
-            logging.error(f"get_all_values failed: {e}")
-            raise
-
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [
@@ -88,8 +78,17 @@ def to_key_series(s: pd.Series) -> pd.Series:
          .replace({"nan": "", "None": ""})
     )
 
+def col_letter_to_index(letter: str) -> int:
+    """A->0, B->1, ..., Z->25, AA->26 ..."""
+    letter = letter.strip().upper()
+    res = 0
+    for ch in letter:
+        if ch not in string.ascii_uppercase:
+            raise ValueError(f"Bad column letter: {letter}")
+        res = res * 26 + (ord(ch) - ord('A') + 1)
+    return res - 1
+
 def looks_like_header(cells: list[str]) -> bool:
-    """Эвристика: шапка — если >=40% ячеек содержат буквы/подчёркивание, а не только цифры/даты/время."""
     if not cells:
         return False
     letterish = 0
@@ -97,14 +96,11 @@ def looks_like_header(cells: list[str]) -> bool:
         s = (v or "").strip()
         if not s:
             continue
-        # если есть буквы любого алфавита или подчёркивание — считаем «похоже на заголовок»
-        if re.search(r"[A-Za-zА-Яа-яÁ-Úá-úÜüÑñÇçŠŽšžİıĞğİİÖöЁё_]", s):
+        if re.search(r"[A-Za-zА-Яа-яÁ-Úá-úÜüÑñÇçŠŽšžİıĞğÖöЁё_]", s):
             letterish += 1
     return (letterish / max(1, len(cells))) >= 0.4
 
-def align_table_to_columns(rows: list[list[str]], columns: list[str]) -> pd.DataFrame:
-    """Строит DataFrame из сырого массива rows, приводя ширину к числу колонок."""
-    width = len(columns)
+def align_rows_to_width(rows: list[list[str]], width: int) -> list[list[str]]:
     fixed = []
     for r in rows:
         r = list(r)
@@ -113,7 +109,7 @@ def align_table_to_columns(rows: list[list[str]], columns: list[str]) -> pd.Data
         else:
             r = r[:width]
         fixed.append(r)
-    return pd.DataFrame(fixed, columns=columns)
+    return fixed
 
 def main():
     # 1) Авторизация
@@ -131,7 +127,7 @@ def main():
 
     logging.info("Source columns (normalized): %s", df_new.columns.tolist())
 
-    # Даты и время
+    # Даты/время
     for col in ["lesson_date", "start_date"]:
         if col in df_new.columns:
             s = pd.to_datetime(df_new[col], errors="coerce")
@@ -142,76 +138,95 @@ def main():
             lambda x: (x.hour / 24 + x.minute / 1440 + x.second / 86400) if pd.notnull(x) else ""
         )
 
+    # 2a) Индекс ключевого столбца по имени (если возможно)
+    key_idx_from_name = None
+    if KEY_COL_NAME and KEY_COL_NAME.lower() in df_new.columns:
+        key_idx_from_name = df_new.columns.get_loc(KEY_COL_NAME.lower())
+
     # 3) Destination
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
     old_vals = ws_dst.get_all_values()
 
-    # Определяем, есть ли шапка
-    if old_vals and len(old_vals) > 0:
-        raw_header = [ (h or "").replace("\ufeff","").strip() for h in old_vals[0] ]
-        has_header = looks_like_header(raw_header)
-    else:
-        raw_header = []
-        has_header = False
+    # Определяем ширину таблицы по source
+    src_width = len(df_new.columns)
+    if not src_width:
+        logging.info("Source is empty — nothing to do.")
+        return
 
     if not old_vals:
-        # Лист пуст
-        df_old = pd.DataFrame(columns=df_new.columns)
-        dest_columns = list(df_new.columns)
-        logging.info("Destination is empty, will use source columns.")
-    elif has_header:
-        # Нормальная шапка
-        df_old = pd.DataFrame(old_vals[1:], columns=[h.lower() for h in raw_header])
-        df_old = normalize_cols(df_old)
-        dest_columns = [c.replace("\ufeff","").strip().lower() for c in raw_header]
-        logging.info("Destination columns (normalized): %s", dest_columns)
+        # Пустой лист — используем ширину source
+        dest_has_header = False
+        dest_header = []
+        rows_data = []
+        dest_width = src_width
+        logging.info("Destination is empty.")
     else:
-        # В первой строке данные (как у тебя в логе). Работаем без явной шапки.
-        dest_columns = list(df_new.columns)
-        df_old = align_table_to_columns(old_vals, dest_columns)
-        df_old = normalize_cols(df_old)
-        logging.info("Destination has no header; treating first row as data. Using source columns: %s", dest_columns)
+        first_row = [ (c or "").replace("\ufeff","").strip() for c in old_vals[0] ]
+        dest_has_header = looks_like_header(first_row)
+        dest_header = first_row if dest_has_header else []
+        rows_data = old_vals[1:] if dest_has_header else old_vals
+        dest_width = max(src_width, len(first_row)) if dest_has_header else max(src_width, max((len(r) for r in old_vals), default=src_width))
 
-        # ❗ Если хочешь один раз записать шапку в A1 — раскомментируй:
-        # ws_dst.update('A1', [dest_columns])
+    # Выравниваем строки по ширине
+    rows_data = align_rows_to_width(rows_data, dest_width)
 
-    # 4) Проверки ключа
-    if KEY_COL not in df_new.columns:
-        logging.error("В source нет столбца '%s'. Колонки: %s", KEY_COL, df_new.columns.tolist())
-        raise KeyError(f"'{KEY_COL}' отсутствует в source (лист '{SOURCE_SHEET_NAME}')")
+    # 3a) Определяем индекс ключа в destination: приоритет — буква столбца
+    key_idx = col_letter_to_index(KEY_COL_LETTER) if KEY_COL_LETTER else None
 
-    # В df_old ключ может отсутствовать только если лист пуст — это ок
-    if (len(df_old.columns) > 0) and (KEY_COL not in df_old.columns):
-        # Если сюда попали — это действительно рассинхрон порядка столбцов.
-        logging.error("В destination не удаётся сопоставить столбец '%s'. Колонки: %s", KEY_COL, df_old.columns.tolist())
-        raise KeyError(f"'{KEY_COL}' отсутствует в destination (лист '{DEST_SHEET_NAME}') и не удалось вывести порядок столбцов")
+    # Если шапка есть и имя ключа совпало — можно переопределить по имени (на случай иных порядков)
+    if dest_has_header and KEY_COL_NAME:
+        norm_header = [h.lower() for h in dest_header]
+        if KEY_COL_NAME.lower() in norm_header:
+            key_idx = norm_header.index(KEY_COL_NAME.lower())
 
-    # 5) Дедуп по ключу как строке
-    old_keys = set(to_key_series(df_old[KEY_COL]).loc[lambda x: x != ""]) if KEY_COL in df_old.columns else set()
-    new_keys_series = to_key_series(df_new[KEY_COL])
+    # Если по букве не получилось (например, пусто), но есть индекс из source по имени — используем его
+    if key_idx is None and key_idx_from_name is not None:
+        key_idx = key_idx_from_name
 
-    mask_new = ~new_keys_series.isin(old_keys)
+    # Если всё равно None — fallback на букву D
+    if key_idx is None:
+        key_idx = col_letter_to_index("D")
+
+    # Контроль диапазона
+    if key_idx < 0 or key_idx >= dest_width:
+        raise IndexError(f"KEY column index out of range: {key_idx} for width {dest_width}")
+
+    # 4) Строим df_old из данных (без зависимости от заголовков)
+    if rows_data:
+        df_old = pd.DataFrame(rows_data)
+    else:
+        df_old = pd.DataFrame(columns=list(range(dest_width)))
+
+    # 5) Множество уже существующих ключей (как строки)
+    if not df_old.empty:
+        old_keys = set(
+            to_key_series(df_old.iloc[:, key_idx]).loc[lambda x: x != ""]
+        )
+    else:
+        old_keys = set()
+
+    # 6) Ключи в source: если есть имя — берём по имени, иначе по индексу key_idx_from_name (который вычислили выше)
+    if KEY_COL_NAME and KEY_COL_NAME.lower() in df_new.columns:
+        new_key_series = to_key_series(df_new[KEY_COL_NAME.lower()])
+    elif key_idx_from_name is not None and key_idx_from_name < len(df_new.columns):
+        new_key_series = to_key_series(df_new.iloc[:, key_idx_from_name])
+    else:
+        # Если даже в source нет столбца по имени — критическая ситуация
+        raise KeyError(f"В source нет ключевого столбца '{KEY_COL_NAME}', а позиция по имени определить не удалось")
+
+    mask_new = ~new_key_series.isin(old_keys)
     to_append = df_new.loc[mask_new].copy()
 
-    # 6) Выровнять порядок колонок под destination
-    to_append = to_append.reindex(columns=dest_columns, fill_value="")
+    # 7) Перед записью — просто отдаём значения как есть (позиция столбцов = порядок в таблице)
+    # Если хочешь жёстко выровнять под ширину destination, можно дорезать/дополнить:
+    values = to_append.values.tolist()
+    values = align_rows_to_width(values, dest_width)
 
-    # 7) Чистка и лог
-    to_append = to_append.replace([float('inf'), float('-inf')], pd.NA).fillna("")
-    logging.info("Новых строк к добавлению: %d", len(to_append))
+    logging.info("Новых строк к добавлению: %d", len(values))
 
-    # 8) Запись
-    if not to_append.empty:
-        ws_dst.append_rows(
-            to_append.values.tolist(),
-            value_input_option="RAW"
-        )
-        logging.info("✔ Добавлено строк: %d", len(to_append))
+    if values:
+        ws_dst.append_rows(values, value_input_option="RAW")
+        logging.info("✔ Добавлено строк: %d", len(values))
     else:
-        logging.info("→ Новых строк не найдено")
-
-    logging.info("✔ Импорт завершён")
-
-if __name__ == "__main__":
-    main()
+        l
