@@ -13,11 +13,12 @@ from gspread.exceptions import APIError, WorksheetNotFound
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # ——— Жёстко прописанные константы ———
-SRC_SS_ID        = "1gk6AV3sKtrMVG8Oxyzf2cODv_vmAIThiX5cHCVxSNjE"
-SRC_SHEET_NAME   = "QA Workspace"
+SRC_SS_ID          = "1gk6AV3sKtrMVG8Oxyzf2cODv_vmAIThiX5cHCVxSNjE"
+SRC_SHEET_NAME_1   = "QA Workspace"
+SRC_SHEET_NAME_2   = "QA Workspace Graduations"
 
-DST_SS_ID        = "1njy8V5lyG3vyENr1b50qGd3infU4VHYP4CfaD0H1AlM"
-DST_SHEET_NAME   = "Lessons"
+DST_SS_ID          = "1njy8V5lyG3vyENr1b50qGd3infU4VHYP4CfaD0H1AlM"
+DST_SHEET_NAME     = "Lessons"
 # ————————————————————————————————
 
 SERVICE_ACCOUNT_JSON = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
@@ -39,6 +40,46 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
+def extract_next_after_tutor(rows, max_cols=15):
+    """
+    rows: список списков из диапазона A:O (или шире).
+    Возвращает список строк (только A:O), которые идут сразу после строк, где A == 'Tutor'.
+    """
+    out = []
+    for idx, row in enumerate(rows):
+        if idx + 1 < len(rows) and (row[0] if row else "") == "Tutor":
+            nxt = rows[idx + 1][:max_cols]
+            if len(nxt) < max_cols:
+                nxt = nxt + [""] * (max_cols - len(nxt))
+            out.append(nxt)
+    return out
+
+def read_source_df(sh_src, sheet_name):
+    """Читает один лист (A:O), вытаскивает нужные строки и возвращает DataFrame."""
+    try:
+        ws = api_retry(sh_src.worksheet, sheet_name)
+    except WorksheetNotFound:
+        logging.warning(f"Sheet '{sheet_name}' not found, skipping.")
+        return None
+
+    rows = api_retry(ws.get, "A:O")
+    if not rows:
+        logging.info(f"No data in '{sheet_name}'.")
+        return None
+
+    header = rows[0][:15]
+    if len(header) < 15:
+        header = header + [""] * (15 - len(header))
+
+    out = extract_next_after_tutor(rows, max_cols=15)
+    if not out:
+        logging.info(f"No rows after 'Tutor' in '{sheet_name}'.")
+        return None
+
+    df = pd.DataFrame(out, columns=header)
+    logging.info(f"✔ Collected {len(df)} rows from '{sheet_name}'.")
+    return df
+
 def main():
     # 1) Авторизация
     scope  = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
@@ -46,48 +87,43 @@ def main():
     client = gspread.authorize(creds)
     logging.info("✔ Authenticated to Google Sheets")
 
-    # 2) Читаем исходный лист с retry
+    # 2) Открываем источник
     sh_src = api_retry(client.open_by_key, SRC_SS_ID)
-    ws_src = api_retry(sh_src.worksheet, SRC_SHEET_NAME)
-    rows   = api_retry(ws_src.get_all_values)
 
-    # 3) Собираем строки сразу после каждой A="Tutor"
-    out = []
-    for idx, row in enumerate(rows):
-        if idx + 1 < len(rows) and row[0] == "Tutor":
-            out.append(rows[idx + 1])
+    # 3) Читаем оба листа и объединяем
+    df_list = []
+    for sheet_name in (SRC_SHEET_NAME_1, SRC_SHEET_NAME_2):
+        df = read_source_df(sh_src, sheet_name)
+        if df is not None:
+            df_list.append(df)
 
-    if not out:
-        logging.info("No rows after 'Tutor', nothing to write.")
+    if not df_list:
+        logging.info("No rows from any source sheets, nothing to write.")
         return
 
-    # 4) Формируем DataFrame (шапка из первой строки источника)
-    header = rows[0]
-    df     = pd.DataFrame(out, columns=header)
+    df_all = pd.concat(df_list, ignore_index=True)
 
-    # 5) Очищаем диапазон A2:Q (только до конца старых данных) и записываем новые
+    # 4) Пишем в назначение (A2:O)
     sh_dst = api_retry(client.open_by_key, DST_SS_ID)
     ws_dst = api_retry(sh_dst.worksheet, DST_SHEET_NAME)
-    
-    # сколько сейчас строк занято в A2:Q
-    existing = api_retry(ws_dst.get, "A2:Q")
+
+    existing = api_retry(ws_dst.get, "A2:O")
     end_row = 1 + len(existing)  # A2…A{end_row}
-    
     if end_row >= 2:
-        api_retry(ws_dst.batch_clear, [f"A2:Q{end_row}"])
-    
+        api_retry(ws_dst.batch_clear, [f"A2:O{end_row}"])
+
     api_retry(
         set_with_dataframe,
         ws_dst,
-        df,
+        df_all,
         row=2,
         col=1,
         include_index=False,
         include_column_header=False,
-        resize=False   # ← чтобы не чистились столбцы справа
+        resize=False
     )
 
-    logging.info(f"✔ Written {len(df)} rows to '{DST_SHEET_NAME}' starting at A2")
+    logging.info(f"✔ Written {len(df_all)} rows to '{DST_SHEET_NAME}' starting at A2:O")
 
 if __name__ == "__main__":
     main()
