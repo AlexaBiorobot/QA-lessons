@@ -22,9 +22,9 @@ DST_SHEET_NAME     = "Lessons"
 # ————————————————————————————————
 
 SERVICE_ACCOUNT_JSON = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+COLS_15 = [chr(ord("A") + i) for i in range(15)]  # ["A", ..., "O"]
 
 def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
-    """Retry any Google Sheets API call on 5xx errors."""
     backoff = initial_backoff
     for attempt in range(1, max_attempts + 1):
         try:
@@ -40,43 +40,35 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
-def extract_next_after_tutor(rows, max_cols=15):
-    """
-    rows: список списков из диапазона A:O (или шире).
-    Возвращает список строк (только A:O), которые идут сразу после строк, где A == 'Tutor'.
-    """
+def extract_next_after_tutor(rows, width=15):
     out = []
-    for idx, row in enumerate(rows):
-        if idx + 1 < len(rows) and (row[0] if row else "") == "Tutor":
-            nxt = rows[idx + 1][:max_cols]
-            if len(nxt) < max_cols:
-                nxt = nxt + [""] * (max_cols - len(nxt))
+    for i, r in enumerate(rows):
+        if i + 1 < len(rows) and (r[0] if r else "") == "Tutor":
+            nxt = rows[i + 1][:width]
+            if len(nxt) < width:
+                nxt += [""] * (width - len(nxt))
             out.append(nxt)
     return out
 
 def read_source_df(sh_src, sheet_name):
-    """Читает один лист (A:O), вытаскивает нужные строки и возвращает DataFrame."""
     try:
         ws = api_retry(sh_src.worksheet, sheet_name)
     except WorksheetNotFound:
         logging.warning(f"Sheet '{sheet_name}' not found, skipping.")
         return None
 
+    # Берём A:O, чтобы гарантированно было 15 колонок
     rows = api_retry(ws.get, "A:O")
     if not rows:
         logging.info(f"No data in '{sheet_name}'.")
         return None
 
-    header = rows[0][:15]
-    if len(header) < 15:
-        header = header + [""] * (15 - len(header))
-
-    out = extract_next_after_tutor(rows, max_cols=15)
-    if not out:
+    picked = extract_next_after_tutor(rows, width=15)
+    if not picked:
         logging.info(f"No rows after 'Tutor' in '{sheet_name}'.")
         return None
 
-    df = pd.DataFrame(out, columns=header)
+    df = pd.DataFrame(picked, columns=COLS_15)  # ← фикс: уникальные имена колонок A..O
     logging.info(f"✔ Collected {len(df)} rows from '{sheet_name}'.")
     return df
 
@@ -87,7 +79,7 @@ def main():
     client = gspread.authorize(creds)
     logging.info("✔ Authenticated to Google Sheets")
 
-    # 2) Открываем источник
+    # 2) Источник
     sh_src = api_retry(client.open_by_key, SRC_SS_ID)
 
     # 3) Читаем оба листа и объединяем
@@ -95,6 +87,8 @@ def main():
     for sheet_name in (SRC_SHEET_NAME_1, SRC_SHEET_NAME_2):
         df = read_source_df(sh_src, sheet_name)
         if df is not None:
+            # На всякий случай ещё раз нормализуем имена (если функцию кто-то поменяет)
+            df.columns = COLS_15
             df_list.append(df)
 
     if not df_list:
@@ -103,7 +97,7 @@ def main():
 
     df_all = pd.concat(df_list, ignore_index=True)
 
-    # 4) Пишем в назначение (A2:O)
+    # 4) Запись в целевой лист (A2:O)
     sh_dst = api_retry(client.open_by_key, DST_SS_ID)
     ws_dst = api_retry(sh_dst.worksheet, DST_SHEET_NAME)
 
