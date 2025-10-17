@@ -8,16 +8,17 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
-from gspread.exceptions import APIError
+from gspread.exceptions import APIError, WorksheetNotFound
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # ——— Жёстко прописанные константы ———
-SRC_SS_ID        = "1gk6AV3sKtrMVG8Oxyzf2cODv_vmAIThiX5cHCVxSNjE"
-SRC_SHEET_NAME   = "QA Workspace"
+SRC_SS_ID          = "1gk6AV3sKtrMVG8Oxyzf2cODv_vmAIThiX5cHCVxSNjE"
+SRC_SHEET_NAME_1   = "QA Workspace"
+SRC_SHEET_NAME_2   = "QA Workspace Graduations"
 
-DST_SS_ID        = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
-DST_SHEET_NAME   = "QA - Lesson evaluation"
+DST_SS_ID          = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
+DST_SHEET_NAME     = "QA - Lesson evaluation"
 # ————————————————————————————————
 
 SERVICE_ACCOUNT_JSON = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
@@ -39,6 +40,57 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
+def _extract_rows_after_tutor(rows, width=15):
+    """
+    Возвращает строки (обрезанные/дополненные до width),
+    которые идут сразу после строк, где A == 'Tutor'.
+    """
+    out = []
+    for i, r in enumerate(rows):
+        if i + 1 < len(rows) and (r[0] if r else "") == "Tutor":
+            nxt = rows[i + 1][:width]
+            if len(nxt) < width:
+                nxt += [""] * (width - len(nxt))
+            out.append(nxt)
+    return out
+
+def _read_one_tab(sh_src, sheet_name):
+    """
+    Читает один лист (A:O), вытягивает строки после 'Tutor',
+    оставляет только колонки A, B, O, L (в таком порядке) и возвращает DataFrame.
+    """
+    try:
+        ws = api_retry(sh_src.worksheet, sheet_name)
+    except WorksheetNotFound:
+        logging.warning(f"Sheet '{sheet_name}' not found, skipping.")
+        return None
+
+    # Берём до O, чтобы точно были индексы 0,1,11,14
+    rows = api_retry(ws.get, "A:O")
+    if not rows:
+        logging.info(f"No data in '{sheet_name}'.")
+        return None
+
+    header = rows[0]
+    if len(header) < 15:
+        header += [""] * (15 - len(header))
+
+    # Строки сразу после 'Tutor'
+    picked = _extract_rows_after_tutor(rows, width=15)
+    if not picked:
+        logging.info(f"No rows after 'Tutor' in '{sheet_name}'.")
+        return None
+
+    # Оставляем A, B, O, L (индексы 0,1,14,11) — порядок важен!
+    cols_idx = [0, 1, 14, 11]
+    out = [[row[j] for j in cols_idx] for row in picked]
+
+    # Имена колонок берём из header в той же последовательности
+    cols_names = [header[j] for j in cols_idx]
+    df = pd.DataFrame(out, columns=cols_names)
+    logging.info(f"✔ Collected {len(df)} rows from '{sheet_name}'.")
+    return df
+
 def main():
     # 1) Авторизация
     scope  = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -46,47 +98,45 @@ def main():
     client = gspread.authorize(creds)
     logging.info("✔ Authenticated to Google Sheets")
 
-    # 2) Читаем исходный лист с retry
+    # 2) Источник
     sh_src = api_retry(client.open_by_key, SRC_SS_ID)
-    ws_src = api_retry(sh_src.worksheet, SRC_SHEET_NAME)
-    rows   = api_retry(ws_src.get_all_values)
 
-    # 3) Собираем строки сразу после каждой A="Tutor"
-    out = []
-    for idx, row in enumerate(rows):
-        if idx + 1 < len(rows) and row[0] == "Tutor":
-            out.append(rows[idx + 1])
+    # 3) Читаем оба листа и объединяем
+    df_list = []
+    for sheet_name in (SRC_SHEET_NAME_1, SRC_SHEET_NAME_2):
+        df = _read_one_tab(sh_src, sheet_name)
+        if df is not None:
+            df_list.append(df)
 
-    if not out:
-        logging.info("No rows after 'Tutor', nothing to write.")
+    if not df_list:
+        logging.info("No rows from any source sheets, nothing to write.")
         return
 
-    # 4) Формируем DataFrame (шапка из первой строки источника)
-    header = rows[0]
-    df_full = pd.DataFrame(out, columns=header)
+    df_all = pd.concat(df_list, ignore_index=True)
 
-    # 5) Оставляем только колонки A, B, O, L
-    #    A → index 0, B → 1, L → 11, O → 14
-    df = df_full.iloc[:, [0, 1, 14, 11]]
-
-    # 6) Записываем в целевой лист
+    # 4) Запись в целевой лист (A2:D)
     sh_dst = api_retry(client.open_by_key, DST_SS_ID)
     ws_dst = api_retry(sh_dst.worksheet, DST_SHEET_NAME)
 
-    #    очищаем только A2:D (четыре колонки под наши 4 столбца)
-    api_retry(ws_dst.batch_clear, ["A2:D"])
-    #    заливаем начиная с A2, без заголовков
+    # Чистим только существующий диапазон A2:D
+    existing = api_retry(ws_dst.get, "A2:D")
+    end_row = 1 + len(existing)  # A2…A{end_row}
+    if end_row >= 2:
+        api_retry(ws_dst.batch_clear, [f"A2:D{end_row}"])
+
+    # Заливаем без заголовков
     api_retry(
         set_with_dataframe,
         ws_dst,
-        df,
+        df_all,
         row=2,
         col=1,
         include_index=False,
-        include_column_header=False
+        include_column_header=False,
+        resize=False
     )
 
-    logging.info(f"✔ Written {len(df)} rows to '{DST_SHEET_NAME}' starting at A2")
+    logging.info(f"✔ Written {len(df_all)} rows to '{DST_SHEET_NAME}' starting at A2:D")
 
 if __name__ == "__main__":
     main()
