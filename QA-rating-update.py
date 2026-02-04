@@ -8,7 +8,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
-from gspread.exceptions import APIError, WorksheetNotFound
+from gspread.exceptions import APIError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -38,33 +38,6 @@ def api_retry(func, *args, max_attempts=5, initial_backoff=1.0, **kwargs):
                 continue
             raise
 
-def _extract_data(rows):
-    extracted = []
-    # Индекс 14 соответствует колонке O
-    target_width = 15 
-    
-    for i, row in enumerate(rows):
-        if not row: continue
-        
-        # Поиск ключевого слова "Tutor" в первой колонке (индекс 0)
-        if str(row[0]).strip().lower() == "tutor":
-            if i + 1 < len(rows):
-                data_row = rows[i + 1]
-                # Убеждаемся, что строка содержит достаточно колонок
-                if len(data_row) < target_width:
-                    data_row += [""] * (target_width - len(data_row))
-                
-                # Формируем итоговую строку для колонок A, B, C, D целевой таблицы
-                # Источники: A(0), B(1), O(14), L(11)
-                extracted_row = [
-                    data_row[0],  # Идёт в A (Tutor)
-                    data_row[1],  # Идёт в B (Student)
-                    data_row[14], # Идёт в C (Mark)
-                    data_row[11]  # Идёт в D (Lesson)
-                ]
-                extracted.append(extracted_row)
-    return extracted
-
 def main():
     # 1) Авторизация
     scope  = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -72,31 +45,44 @@ def main():
     client = gspread.authorize(creds)
     logging.info("✔ Авторизация выполнена")
 
-    # 2) Получение данных из источника
+    # 2) Получение всех данных из источника (Лист Lessons)
     sh_src = api_retry(client.open_by_key, SRC_SS_ID)
     ws_src = sh_src.worksheet(SRC_SHEET_NAME)
+    
+    # Забираем всё содержимое листа (включая пустые строки)
     all_rows = api_retry(ws_src.get_all_values)
-    
-    logging.info(f"✔ Считано {len(all_rows)} строк из источника")
-    clean_data = _extract_data(all_rows)
-    
-    if not clean_data:
-        logging.warning("⚠️ Данные по фильтру 'Tutor' не найдены.")
+    if not all_rows:
+        logging.warning("Источник пуст.")
         return
-    
-    df = pd.DataFrame(clean_data)
 
-    # 3) Подготовка целевой таблицы
+    # 3) Выбор колонок A(0), B(1), O(14), L(11)
+    # Начинаем со 2-й строки (индекс [1:]), чтобы не тащить старые заголовки
+    extracted_data = []
+    for row in all_rows[1:]:
+        # Добиваем строку до индекса 14, если она короче
+        if len(row) < 15:
+            row += [""] * (15 - len(row))
+        
+        # Берем данные по индексам
+        extracted_data.append([
+            row[0],  # A -> Tutor
+            row[1],  # B -> Student
+            row[14], # O -> Mark
+            row[11]  # L -> Lesson
+        ])
+
+    df = pd.DataFrame(extracted_data)
+    logging.info(f"✔ Подготовлено {len(df)} строк для переноса")
+
+    # 4) Полная перезапись целевой таблицы (только колонки A-D)
     sh_dst = api_retry(client.open_by_key, DST_SS_ID)
     ws_dst = sh_dst.worksheet(DST_SHEET_NAME)
 
-    # ПОЛНАЯ ПЕРЕЗАПИСЬ КОЛОНОК A, B, C, D
-    # Очищаем диапазон A2:D до максимально возможной строки (50000)
-    # Это гарантирует удаление всех старых данных в этих четырех колонках.
+    # Очищаем колонки A, B, C, D полностью (до 50к строки)
     api_retry(ws_dst.batch_clear, ["A2:D50000"])
-    logging.info("✔ Колонки A2:D50000 полностью очищены")
+    logging.info("✔ Целевой диапазон A2:D50000 очищен")
 
-    # 4) Запись новых данных
+    # Записываем новые данные начиная с A2
     api_retry(
         set_with_dataframe,
         ws_dst,
@@ -108,7 +94,7 @@ def main():
         resize=False
     )
 
-    logging.info(f"✔ Колонки A, B, C, D успешно перезаписаны ({len(df)} строк)")
+    logging.info(f"✔ Данные в колонках A, B, C, D успешно обновлены")
 
 if __name__ == "__main__":
     main()
