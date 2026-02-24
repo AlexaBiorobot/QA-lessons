@@ -32,23 +32,13 @@ REPL_SHEET       = "Replacement"
 
 # === Simple app password gate ===
 def check_app_password():
-    """
-    Простой пароль на вход в Streamlit.
-    Пароль берется из:
-    1) переменной окружения APP_PASSWORD
-    2) st.secrets["APP_PASSWORD"]
-    """
-    # Уже авторизован в этой сессии
     if st.session_state.get("auth_ok", False):
         return True
 
-    # Берем пароль из env или secrets
     app_password = os.getenv("APP_PASSWORD")
     if not app_password:
         app_password = st.secrets.get("APP_PASSWORD", None)
 
-    # Если пароль не задан — можно либо пускать всех, либо блокировать.
-    # Ниже выбрано "блокировать".
     if not app_password:
         st.error("APP_PASSWORD is not configured.")
         st.stop()
