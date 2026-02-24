@@ -2,6 +2,7 @@
 import os
 import io
 import time
+import hmac
 
 import streamlit as st
 st.set_page_config(layout="wide")
@@ -28,6 +29,44 @@ QA_SHEET         = "QA - Lesson evaluation"
 
 REPL_SS          = "1LF2NrAm8J3c43wOoumtsyfQsX1z0_lUQVdByGSPe27U"
 REPL_SHEET       = "Replacement"
+
+# === Simple app password gate ===
+def check_app_password():
+    """
+    Простой пароль на вход в Streamlit.
+    Пароль берется из:
+    1) переменной окружения APP_PASSWORD
+    2) st.secrets["APP_PASSWORD"]
+    """
+    # Уже авторизован в этой сессии
+    if st.session_state.get("auth_ok", False):
+        return True
+
+    # Берем пароль из env или secrets
+    app_password = os.getenv("APP_PASSWORD")
+    if not app_password:
+        app_password = st.secrets.get("APP_PASSWORD", None)
+
+    # Если пароль не задан — можно либо пускать всех, либо блокировать.
+    # Ниже выбрано "блокировать".
+    if not app_password:
+        st.error("APP_PASSWORD is not configured.")
+        st.stop()
+
+    st.title("🔒 Login required")
+
+    with st.form("login_form", clear_on_submit=False):
+        pwd_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Enter")
+
+    if submitted:
+        if hmac.compare_digest(str(pwd_input), str(app_password)):
+            st.session_state["auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Wrong password")
+
+    st.stop()
 
 # === Auth helpers ===
 @st.cache_data(show_spinner=False)
@@ -260,6 +299,13 @@ def build_df():
     return df
 
 # === Streamlit UI ===
+check_app_password()
+
+# Кнопка выхода (опционально)
+if st.sidebar.button("🚪 Log out"):
+    st.session_state["auth_ok"] = False
+    st.rerun()
+
 df = build_df()
 
 # 1. Чекбоксы
