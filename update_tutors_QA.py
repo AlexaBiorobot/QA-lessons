@@ -66,10 +66,11 @@ def dedupe_preserve_order(seq: List[int]) -> List[int]:
     return out
 
 
-def fetch_columns(ws, cols_idx, max_attempts=5, backoff=1.0) -> pd.DataFrame:
+def fetch_columns(ws, cols_idx: List[int], max_attempts=5, backoff=1.0) -> pd.DataFrame:
     """
-    Скачиваем только нужные колонки (0-based indices) через batch_get().
-    Важно: паддим колонки до одинаковой длины, чтобы zip не обрезал данные.
+    Download only needed columns (0-based indices) via batch_get().
+    Pads columns to equal length so we don't truncate rows.
+    Returns a DataFrame with headers from row 1 of each column.
     """
     cols_idx = dedupe_preserve_order(cols_idx)
 
@@ -95,14 +96,14 @@ def fetch_columns(ws, cols_idx, max_attempts=5, backoff=1.0) -> pd.DataFrame:
             if max_len == 0:
                 return pd.DataFrame()
 
-            # pad to max_len
+            # pad all columns to the same length
             padded_cols = []
             for c in cols:
                 if len(c) < max_len:
                     c = c + [""] * (max_len - len(c))
                 padded_cols.append(c)
 
-            # headers from row 1
+            # headers from row 1 values (fallback to __<LETTER>__ if blank)
             headers = []
             for i, c in enumerate(padded_cols):
                 h = c[0] if c else ""
@@ -110,6 +111,7 @@ def fetch_columns(ws, cols_idx, max_attempts=5, backoff=1.0) -> pd.DataFrame:
                     h = f"__{col_letters[i]}__"
                 headers.append(h)
 
+            # data rows from row 2..end
             data_rows = list(zip(*(c[1:] for c in padded_cols)))
             return pd.DataFrame(data_rows, columns=headers)
 
@@ -139,49 +141,50 @@ def main():
     # 2) Source
     sh_src = api_retry_open(client, SOURCE_SS_ID)
     ws_src = api_retry_worksheet(sh_src, SOURCE_SHEET_NAME)
-    logging.info(f"Source: {sh_src.title} / {ws_src.title}")
 
-    # 3) Columns to take (0-based) — existing + added AFTER them (BH не нужен)
+    # 3) Columns to take (0-based). BH is intentionally NOT included.
     cols_to_take = [0, 1, 2, 21, 4, 15, 16]             # A, B, C, V, E, P, Q
-    cols_to_take += list(range(6, 15))                  # G..O  (6..14)
+    cols_to_take += list(range(6, 15))                  # G..O (6..14)
     cols_to_take += [25, 31, 41, 46]                    # Z, AF, AP, AU
     cols_to_take += list(range(49, 56))                 # AX..BD (49..55)
-
     cols_to_take = dedupe_preserve_order(cols_to_take)
 
     df = fetch_columns(ws_src, cols_to_take)
-    logging.info(f"→ Fetched {len(cols_to_take)} cols, df shape={df.shape}")
+    logging.info(f"→ Fetched cols={len(cols_to_take)}, df shape={df.shape}")
     if df.empty:
         raise ValueError("Fetched DataFrame is empty — check source sheet/ranges.")
 
     # 4) Destination
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
-    logging.info(f"Dest: {sh_dst.title} / {ws_dst.title}")
 
-    # Определяем ширину записи (сколько колонок реально пишем в DEST)
+    # Write starting from row 2 to keep row 1 untouched
+    START_ROW = 2
+
+    # We will overwrite only A..end_col (based on df width)
     target_cols = int(df.shape[1])
     end_col = ''.join(filter(str.isalpha, rowcol_to_a1(1, target_cols)))  # e.g. "AK"
-    logging.info(f"Will write into DEST range: A:{end_col} (only these columns will be cleared/overwritten)")
+    logging.info(f"Will overwrite DEST columns A:{end_col} starting from row {START_ROW}")
 
-    # ⚠️ ВАЖНО: чистим ТОЛЬКО колонки, которые перезаписываем.
-    # Это не тронет ничего правее end_col.
-    ws_dst.batch_clear([f"A:{end_col}"])
-
-    # Никогда НЕ уменьшаем лист по ширине/высоте — чтобы не потерять “ручные” колонки справа
-    # (если нужно, расширим высоту под данные)
-    needed_rows = df.shape[0] + 1  # header + data
+    # Ensure enough rows (DO NOT shrink sheet; do not change col count)
+    needed_rows = df.shape[0] + (START_ROW - 1)
     if ws_dst.row_count < needed_rows:
         ws_dst.resize(rows=needed_rows)
 
-    # Пишем df начиная с A1
-    set_with_dataframe(ws_dst, df, include_index=False, include_column_header=True)
-    logging.info(f"✔ Written to '{DEST_SHEET_NAME}' — rows={df.shape[0]} cols={df.shape[1]}")
+    # Clear only the area we overwrite: columns A..end_col, rows START_ROW..bottom
+    ws_dst.batch_clear([f"A{START_ROW}:{end_col}{ws_dst.row_count}"])
 
-    # Контроль: покажем первые заголовки в DEST
-    a1 = ws_dst.acell("A1").value
-    b1 = ws_dst.acell("B1").value
-    logging.info(f"Dest headers now: A1={a1!r}, B1={b1!r}")
+    # Write df to A2 WITHOUT column headers (row 1 remains as is)
+    set_with_dataframe(
+        ws_dst,
+        df,
+        row=START_ROW,
+        col=1,
+        include_index=False,
+        include_column_header=False
+    )
+
+    logging.info(f"✔ Written to '{DEST_SHEET_NAME}' — rows={df.shape[0]} cols={df.shape[1]}")
 
 
 if __name__ == "__main__":
