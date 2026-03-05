@@ -103,7 +103,6 @@ def main():
     cols_to_take += [41]                     # AP
     cols_to_take += [46]                     # AU
     cols_to_take += list(range(49, 56))      # AX..BD (49..55)
-    cols_to_take += [59]                     # BH
 
     df = fetch_columns(ws_src, cols_to_take)
     logging.info(f"→ Fetched columns {cols_to_take}, resulting shape={df.shape}")
