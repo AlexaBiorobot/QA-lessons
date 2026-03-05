@@ -62,14 +62,12 @@ def fetch_columns(ws, cols_idx, max_attempts=5, backoff=1.0):
     """
     for attempt in range(1, max_attempts+1):
         try:
-            # строим диапазоны A1:A, B1:B, C1:C, V1:V, E1:E
             ranges = []
             for idx in cols_idx:
                 a1 = rowcol_to_a1(1, idx+1)                # "A1", "B1", ...
                 col = ''.join(filter(str.isalpha, a1))     # "A", "B", ...
                 ranges.append(f"{col}1:{col}")
             batch = ws.batch_get(ranges)
-            # из batch получаем список колонок, каждая — список строк
             cols = [[row[0] if row else "" for row in col] for col in batch]
             headers = [c[0] for c in cols]
             data    = list(zip(*(c[1:] for c in cols)))
@@ -85,7 +83,6 @@ def fetch_columns(ws, cols_idx, max_attempts=5, backoff=1.0):
 
 
 def main():
-    # 1) Авторизация
     scope   = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds   = ServiceAccountCredentials.from_json_keyfile_dict(
                   json.loads(os.environ["GCP_SERVICE_ACCOUNT"]), scope
@@ -93,19 +90,31 @@ def main():
     client  = gspread.authorize(creds)
     logging.info("✔ Authenticated to Google Sheets")
 
-    # 2) Открываем исходный лист
     sh_src = api_retry_open(client, SOURCE_SS_ID)
     ws_src = api_retry_worksheet(sh_src, SOURCE_SHEET_NAME)
 
     # 3) Тянем только нужные колонки
     cols_to_take = [0, 1, 2, 21, 4, 15, 16]  # A, B, C, V, E, P, Q
+
+    # добавленные (после существующих):
+    cols_to_take += list(range(6, 15))       # G..O  (6..14)
+    cols_to_take += [25]                     # Z
+    cols_to_take += [31]                     # AF
+    cols_to_take += [41]                     # AP
+    cols_to_take += [46]                     # AU
+    cols_to_take += list(range(49, 56))      # AX..BD (49..55)
+    cols_to_take += [59]                     # BH
+
     df = fetch_columns(ws_src, cols_to_take)
     logging.info(f"→ Fetched columns {cols_to_take}, resulting shape={df.shape}")
 
-    # 4) Запись в целевой лист
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
-    ws_dst.batch_clear(["A:G"])
+
+    # чистим ровно диапазон под записываемые колонки
+    end_col = ''.join(filter(str.isalpha, rowcol_to_a1(1, len(cols_to_take))))
+    ws_dst.batch_clear([f"A:{end_col}"])
+
     set_with_dataframe(ws_dst, df)
     logging.info(f"✔ Written to '{DEST_SHEET_NAME}' — {df.shape[0]} rows")
 
