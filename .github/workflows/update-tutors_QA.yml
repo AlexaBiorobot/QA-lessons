@@ -28,4 +28,4 @@ jobs:
       - name: Run update script
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-        run: python update_tutors.py
+        run: python update_tutors_QA.py
