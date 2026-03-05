@@ -96,14 +96,12 @@ def fetch_columns(ws, cols_idx: List[int], max_attempts=5, backoff=1.0) -> pd.Da
             if max_len == 0:
                 return pd.DataFrame()
 
-            # pad all columns to the same length
             padded_cols = []
             for c in cols:
                 if len(c) < max_len:
                     c = c + [""] * (max_len - len(c))
                 padded_cols.append(c)
 
-            # headers from row 1 values (fallback to __<LETTER>__ if blank)
             headers = []
             for i, c in enumerate(padded_cols):
                 h = c[0] if c else ""
@@ -111,7 +109,6 @@ def fetch_columns(ws, cols_idx: List[int], max_attempts=5, backoff=1.0) -> pd.Da
                     h = f"__{col_letters[i]}__"
                 headers.append(h)
 
-            # data rows from row 2..end
             data_rows = list(zip(*(c[1:] for c in padded_cols)))
             return pd.DataFrame(data_rows, columns=headers)
 
@@ -142,7 +139,7 @@ def main():
     sh_src = api_retry_open(client, SOURCE_SS_ID)
     ws_src = api_retry_worksheet(sh_src, SOURCE_SHEET_NAME)
 
-    # 3) Columns to take (0-based). BH is intentionally NOT included.
+    # 3) Columns to take (0-based). BH is NOT included.
     cols_to_take = [0, 1, 2, 21, 4, 15, 16]             # A, B, C, V, E, P, Q
     cols_to_take += list(range(6, 15))                  # G..O (6..14)
     cols_to_take += [25, 31, 41, 46]                    # Z, AF, AP, AU
@@ -158,30 +155,31 @@ def main():
     sh_dst = api_retry_open(client, DEST_SS_ID)
     ws_dst = api_retry_worksheet(sh_dst, DEST_SHEET_NAME)
 
-    # Write starting from row 2 to keep row 1 untouched
+    # Пишем ВСЁ начиная со 2-й строки:
+    # row 2 = заголовки, row 3.. = данные
     START_ROW = 2
 
-    # We will overwrite only A..end_col (based on df width)
     target_cols = int(df.shape[1])
     end_col = ''.join(filter(str.isalpha, rowcol_to_a1(1, target_cols)))  # e.g. "AK"
     logging.info(f"Will overwrite DEST columns A:{end_col} starting from row {START_ROW}")
 
-    # Ensure enough rows (DO NOT shrink sheet; do not change col count)
-    needed_rows = df.shape[0] + (START_ROW - 1)
+    # Не уменьшаем лист, только расширяем вниз если надо
+    # Нужно место под: 1 строка заголовков + N строк данных, начиная с START_ROW
+    needed_rows = START_ROW + df.shape[0]  # header at START_ROW + data rows below
     if ws_dst.row_count < needed_rows:
         ws_dst.resize(rows=needed_rows)
 
-    # Clear only the area we overwrite: columns A..end_col, rows START_ROW..bottom
+    # Чистим только то, что перезапишем: A..end_col, начиная со строки 2
     ws_dst.batch_clear([f"A{START_ROW}:{end_col}{ws_dst.row_count}"])
 
-    # Write df to A2 WITHOUT column headers (row 1 remains as is)
+    # Пишем с A2 С заголовками (они попадут в строку 2)
     set_with_dataframe(
         ws_dst,
         df,
         row=START_ROW,
         col=1,
         include_index=False,
-        include_column_header=False
+        include_column_header=True
     )
 
     logging.info(f"✔ Written to '{DEST_SHEET_NAME}' — rows={df.shape[0]} cols={df.shape[1]}")
