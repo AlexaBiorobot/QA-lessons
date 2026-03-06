@@ -1,0 +1,37 @@
+name: Update QA
+
+on:
+  workflow_dispatch:      # позволяет запустить вручную из UI
+  #schedule:
+  #  - cron: "0 */4 * * *"  # автоматически каждые 4 часа
+
+jobs:
+  update-custom:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            pandas \
+            requests \
+            gspread \
+            oauth2client \
+            gspread-dataframe
+
+      - name: Run custom update script
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: python QA_QA.py
+
+      - name: Notify success
+        run: echo "✅ Custom columns updated successfully"
